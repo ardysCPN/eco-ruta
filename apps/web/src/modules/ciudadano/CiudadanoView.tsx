@@ -519,16 +519,22 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
 
   // Click interactivo en el mapa Leaflet
   const handleMapClick = (lat: number, lng: number) => {
-    if (pickingMode === 'inmueble' || showInmuebleModal) {
+    if (showInmuebleModal) {
       setNuevoInmuebleCoords({ lat, lng });
-      setShowInmuebleModal(true);
-      setPickingMode(null);
       toast.success(`📍 Predio fijado en mapa: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-    } else if (pickingMode === 'pqrs' || showPqrsModal) {
+    } else if (showPqrsModal) {
       setPqrsCoords({ lat, lng });
-      setShowPqrsModal(true);
-      setPickingMode(null);
       toast.success(`📍 Incidencia fijada en mapa: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    } else {
+      toast.info(`📍 Punto seleccionado: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, {
+        action: {
+          label: 'Fijar Mi Predio',
+          onClick: () => {
+            setNuevoInmuebleCoords({ lat, lng });
+            setShowInmuebleModal(true);
+          }
+        }
+      });
     }
   };
 
@@ -725,6 +731,13 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
         routeGeoJson={currentRuta?.trazado_geojson}
         inmuebles={isPublic ? [] : inmuebles}
         puntosAcopio={puntosAcopio}
+        selectedPoint={
+          showInmuebleModal && nuevoInmuebleCoords
+            ? { ...nuevoInmuebleCoords, label: nuevoInmuebleEtiqueta || 'Mi Predio', color: '#38bdf8' }
+            : (showPqrsModal && pqrsCoords
+                ? { ...pqrsCoords, label: 'Incidencia PQRS', color: '#ef4444' }
+                : null)
+        }
         onMapClick={handleMapClick}
         height="100%"
       />
@@ -1100,19 +1113,21 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
       )}
 
       {/* Modal Registrar Inmueble */}
-      {showInmuebleModal && !pickingMode && (
+      {/* Modal Registrar Inmueble (Panel flotante interactivo, NO bloquea el mapa) */}
+      {showInmuebleModal && (
         <div style={{
           position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(6px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-          padding: '16px'
+          top: '72px',
+          right: '16px',
+          zIndex: 1100,
+          width: 'min(440px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 88px)',
+          overflowY: 'auto',
+          borderRadius: '16px',
+          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(56, 189, 248, 0.25)',
+          animation: 'fadeIn 0.2s ease-out'
         }}>
-          <div className="glass-panel modal-overlay-content" style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', padding: '22px' }}>
+          <div className="glass-panel modal-overlay-content" style={{ width: '100%', padding: '20px', background: 'rgba(11, 19, 25, 0.97)', border: '1.5px solid rgba(56, 189, 248, 0.5)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <h3 style={{ color: '#38bdf8', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
                 <MapPin size={20} /> Registrar Mi Predio Privado
@@ -1197,8 +1212,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
                 <button
                   type="button"
                   onClick={() => {
-                    setShowInmuebleModal(false);
-                    setPickingMode('inmueble');
+                    toast.info('👆 Toca directamente en cualquier calle o esquina del mapa para clavar el pin de tu predio.');
                   }}
                   className="btn btn-secondary"
                   style={{ fontSize: '0.76rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 10px' }}
@@ -1290,20 +1304,21 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
         </div>
       )}
 
-      {/* Modal Reportar PQRS */}
-      {showPqrsModal && !pickingMode && (
+      {/* Modal Reportar PQRS (Panel flotante interactivo, NO bloquea el mapa) */}
+      {showPqrsModal && (
         <div style={{
           position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          backdropFilter: 'blur(6px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-          padding: '16px'
+          top: '72px',
+          right: '16px',
+          zIndex: 1100,
+          width: 'min(440px, calc(100vw - 32px))',
+          maxHeight: 'calc(100vh - 88px)',
+          overflowY: 'auto',
+          borderRadius: '16px',
+          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(239, 68, 68, 0.25)',
+          animation: 'fadeIn 0.2s ease-out'
         }}>
-          <div className="glass-panel modal-overlay-content" style={{ width: '100%', maxWidth: '480px', maxHeight: '90vh', overflowY: 'auto', padding: '22px' }}>
+          <div className="glass-panel modal-overlay-content" style={{ width: '100%', padding: '20px', background: 'rgba(11, 19, 25, 0.97)', border: '1.5px solid rgba(239, 68, 68, 0.5)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <h3 style={{ color: '#ef4444', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
                 <Camera size={20} /> Reporte Fotográfico Cívico (PQRS)
@@ -1376,8 +1391,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
                 <button
                   type="button"
                   onClick={() => {
-                    setShowPqrsModal(false);
-                    setPickingMode('pqrs');
+                    toast.info('👆 Toca directamente en cualquier punto del mapa para clavar el pin de la incidencia.');
                   }}
                   className="btn btn-secondary"
                   style={{ fontSize: '0.76rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px 10px' }}

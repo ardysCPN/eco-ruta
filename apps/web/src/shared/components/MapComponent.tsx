@@ -68,6 +68,7 @@ interface MapComponentProps {
   heatmapPoints?: HeatmapPoint[];
   showHeatmap?: boolean;
   pqrsList?: any[];
+  selectedPoint?: { lat: number; lng: number; label?: string; color?: string } | null;
   onMapClick?: (lat: number, lng: number) => void;
   onAddPoint?: (lat: number, lng: number) => void;
   customWaypoints?: [number, number][];
@@ -93,6 +94,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   cuencas = [],
   heatmapPoints = [],
   showHeatmap = false,
+  selectedPoint = null,
   onMapClick,
   onAddPoint,
   height = '520px',
@@ -111,6 +113,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const novedadesLayerRef = useRef<L.LayerGroup | null>(null);
   const cuencasLayerRef = useRef<L.LayerGroup | null>(null);
   const heatmapLayerRef = useRef<L.LayerGroup | null>(null);
+  const selectedPointLayerRef = useRef<L.LayerGroup | null>(null);
 
   // Modo Claro / Modo Oscuro
   const [currentTheme, setCurrentTheme] = useState<'dark' | 'light'>(() => {
@@ -159,6 +162,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     novedadesLayerRef.current = L.layerGroup().addTo(map);
     cuencasLayerRef.current = L.layerGroup().addTo(map);
     heatmapLayerRef.current = L.layerGroup().addTo(map);
+    selectedPointLayerRef.current = L.layerGroup().addTo(map);
 
     // Click handler
     map.on('click', (e: L.LeafletMouseEvent) => {
@@ -512,6 +516,65 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         .addTo(cuencasLayerRef.current!);
     });
   }, [cuencas]);
+
+  // Marcador Interactivo de Selección (Predio / Incidencia PQRS)
+  useEffect(() => {
+    if (!selectedPointLayerRef.current) return;
+    selectedPointLayerRef.current.clearLayers();
+
+    if (!selectedPoint) return;
+
+    const color = selectedPoint.color || '#38bdf8';
+    const label = selectedPoint.label || 'Ubicación seleccionada';
+
+    const icon = L.divIcon({
+      className: 'selected-point-marker',
+      html: `
+        <div style="
+          position: relative;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          cursor: pointer;
+        ">
+          <div style="
+            background: ${color};
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            white-space: nowrap;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+            border: 2px solid #ffffff;
+            margin-bottom: 2px;
+          ">
+            📍 ${label}
+          </div>
+          <div style="
+            width: 16px;
+            height: 16px;
+            background: ${color};
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 0 14px ${color};
+          "></div>
+        </div>
+      `,
+      iconSize: [140, 50],
+      iconAnchor: [70, 46]
+    });
+
+    const marker = L.marker([selectedPoint.lat, selectedPoint.lng], { icon })
+      .addTo(selectedPointLayerRef.current);
+
+    marker.bindPopup(`<b>${label}</b><br/>Lat: ${selectedPoint.lat.toFixed(5)}<br/>Lng: ${selectedPoint.lng.toFixed(5)}`);
+
+    const map = mapInstanceRef.current;
+    if (map) {
+      map.panTo([selectedPoint.lat, selectedPoint.lng], { animate: true, duration: 0.8 });
+    }
+  }, [selectedPoint]);
 
   // Heatmap / Puntos Críticos (Alcaldía)
   useEffect(() => {
