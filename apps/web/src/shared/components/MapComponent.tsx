@@ -141,8 +141,9 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
     const map = L.map(mapContainerRef.current, {
       zoomControl: false,
-      attributionControl: false
-    }).setView(center, zoom);
+      attributionControl: false,
+      tap: false
+    } as any).setView(center, zoom);
 
     // Tiles iniciales según tema
     const tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -164,10 +165,21 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     heatmapLayerRef.current = L.layerGroup().addTo(map);
     selectedPointLayerRef.current = L.layerGroup().addTo(map);
 
-    // Click handler
+    // Click handler y Long-press (Móvil y Web)
+    const triggerClick = (lat: number, lng: number) => {
+      if (onMapClickRef.current) onMapClickRef.current(lat, lng);
+      if (onAddPointRef.current) onAddPointRef.current(lat, lng);
+    };
+
     map.on('click', (e: L.LeafletMouseEvent) => {
-      if (onMapClickRef.current) onMapClickRef.current(e.latlng.lat, e.latlng.lng);
-      if (onAddPointRef.current) onAddPointRef.current(e.latlng.lat, e.latlng.lng);
+      triggerClick(e.latlng.lat, e.latlng.lng);
+    });
+
+    map.on('contextmenu', (e: L.LeafletMouseEvent) => {
+      if (e.originalEvent) {
+        e.originalEvent.preventDefault();
+      }
+      triggerClick(e.latlng.lat, e.latlng.lng);
     });
 
     mapInstanceRef.current = map;

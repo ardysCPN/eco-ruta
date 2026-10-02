@@ -115,6 +115,28 @@ const COORDENADAS_BARRIOS_QUIBDO: Record<string, { lat: number; lng: number }> =
   'Barranco': { lat: 5.6300, lng: -76.6300 }
 };
 
+// Helper para encontrar el barrio más cercano a un punto clicado en el mapa
+const getBarrioCercano = (lat: number, lng: number): string | null => {
+  let closestBarrio: string | null = null;
+  let minDistance = Infinity;
+
+  for (const [barrio, coords] of Object.entries(COORDENADAS_BARRIOS_QUIBDO)) {
+    const dLat = (coords.lat - lat) * 111000;
+    const dLng = (coords.lng - lng) * 111000 * Math.cos((lat * Math.PI) / 180);
+    const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestBarrio = barrio;
+    }
+  }
+
+  // Si está a menos de 850m de algún barrio de referencia
+  if (minDistance < 850 && closestBarrio) {
+    return closestBarrio;
+  }
+  return null;
+};
+
 interface CiudadanoViewProps {
   isPublic?: boolean;
   onOpenAuth?: () => void;
@@ -205,8 +227,8 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
   const [selectedBarrioPqrs, setSelectedBarrioPqrs] = useState('');
   const [isSubmittingPqrs, setIsSubmittingPqrs] = useState(false);
 
-  // Modo interactivo para marcar directamente en el mapa (cierra modal y muestra banner superior)
-  const [pickingMode, setPickingMode] = useState<'inmueble' | 'pqrs' | null>(null);
+  // Punto seleccionado interactivamente al tocar/hacer clic en el mapa (Móvil y Web)
+  const [clickedPoint, setClickedPoint] = useState<{ lat: number; lng: number; barrio?: string } | null>(null);
 
   // Modal Ambiental / Cuencas
   const [showAmbientalModal, setShowAmbientalModal] = useState(false);
@@ -252,6 +274,20 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
     if (inmuebles.length === 0) return null;
     return inmuebles.find((i) => i.id === selectedInmuebleId) || inmuebles[0];
   }, [inmuebles, selectedInmuebleId]);
+
+  // Validar si el punto clicado está cerca o coincide con un predio del usuario
+  const inmuebleCercanoAlPunto = useMemo(() => {
+    if (!clickedPoint || inmuebles.length === 0) return null;
+    return inmuebles.find((inm) => {
+      const dLat = (inm.lat - clickedPoint.lat) * 111000;
+      const dLng = (inm.lng - clickedPoint.lng) * 111000 * Math.cos((clickedPoint.lat * Math.PI) / 180);
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+      return dist <= 60; // a menos de 60 metros
+    });
+  }, [clickedPoint, inmuebles]);
+
+  // Si hay cualquier drawer o modal lateral/inferior abierto
+  const isAnyDrawerOpen = Boolean(clickedPoint || showInmuebleModal || showPqrsModal);
 
   // Centro dinámico del mapa (enfoca en el predio activo o centro de Quibdó)
   const mapCenter: [number, number] = useMemo(() => {
@@ -517,24 +553,36 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
     reader.readAsDataURL(file);
   };
 
-  // Click interactivo en el mapa Leaflet
+  // Click interactivo en el mapa Leaflet (Móvil y Web)
   const handleMapClick = (lat: number, lng: number) => {
+    const barrio = getBarrioCercano(lat, lng) || undefined;
+    const point = { lat, lng, barrio };
+
+    // Si el modal de predio está abierto, actualizar sus datos directamente
     if (showInmuebleModal) {
       setNuevoInmuebleCoords({ lat, lng });
-      toast.success(`📍 Predio fijado en mapa: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-    } else if (showPqrsModal) {
+      if (barrio && !selectedBarrioInmueble) setSelectedBarrioInmueble(barrio);
+      toast.success(`📍 Predio fijado en ${barrio ? `Barrio ${barrio}` : 'mapa'}: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      return;
+    }
+
+    // Si el modal de PQRS está abierto, actualizar sus datos directamente
+    if (showPqrsModal) {
       setPqrsCoords({ lat, lng });
-      toast.success(`📍 Incidencia fijada en mapa: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-    } else {
-      toast.info(`📍 Punto seleccionado: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, {
-        action: {
-          label: 'Fijar Mi Predio',
-          onClick: () => {
-            setNuevoInmuebleCoords({ lat, lng });
-            setShowInmuebleModal(true);
-          }
-        }
-      });
+      if (barrio && !selectedBarrioPqrs) setSelectedBarrioPqrs(barrio);
+      toast.success(`📍 Incidencia fijada en ${barrio ? `Barrio ${barrio}` : 'mapa'}: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      return;
+    }
+
+    // Punto nuevo marcado en el mapa (Web y Móvil): mostrar opciones y fijar pin
+    setClickedPoint(point);
+    setIsBottomCardCollapsed(true); // Ocultar panel de recolección para dejar ver las opciones
+
+    // Vibración táctil háptica en móviles
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(50);
+      } catch (_) {}
     }
   };
 
@@ -559,7 +607,8 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
 
   // Guardar Inmueble Privado (Máx 3)
   const handleGuardarInmueble = async () => {
-    if (isPublic) {
+    if (isPublic || !user) {
+      toast.info('Debes iniciar sesión para vincular y registrar un predio privado.');
       onOpenAuth?.();
       return;
     }
@@ -575,7 +624,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
     setIsSubmittingInmueble(true);
     try {
       const res = await api.crearInmueble({
-        usuario_id: user?.id,
+        usuario_id: user.id,
         etiqueta: nuevoInmuebleEtiqueta.trim(),
         lat: nuevoInmuebleCoords.lat,
         lng: nuevoInmuebleCoords.lng,
@@ -590,6 +639,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
       setNuevoInmuebleDireccion('');
       setSelectedBarrioInmueble('');
       setNuevoInmuebleCoords(null);
+      setClickedPoint(null);
       toast.success('🎉 ¡Inmueble privado registrado con éxito!');
     } catch (err: any) {
       toast.error(err.message || 'Error al guardar inmueble');
@@ -600,6 +650,11 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
 
   // Enviar Reporte Cívico Fotográfico (PQRS)
   const handleEnviarPqrs = async () => {
+    if (isPublic || !user) {
+      toast.info('Debes iniciar sesión para enviar un reporte cívico oficial.');
+      onOpenAuth?.();
+      return;
+    }
     if (!descripcionPqrs.trim() || !pqrsCoords) {
       toast.error('Por favor escribe la descripción y fija el punto en Quibdó (GPS, Barrio o Mapa).');
       return;
@@ -613,7 +668,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
         lat: pqrsCoords.lat,
         lng: pqrsCoords.lng,
         foto_base64: fotoBase64 || undefined,
-        usuario_id: user?.id || undefined
+        usuario_id: user.id
       });
       if (res.data) {
         setMisPqrs((prev) => [res.data, ...prev]);
@@ -623,6 +678,7 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
       setFotoBase64('');
       setPqrsCoords(null);
       setSelectedBarrioPqrs('');
+      setClickedPoint(null);
       toast.success('✅ ¡Reporte cívico enviado a Aguas del Atrato!', {
         description: 'La cuadrilla y supervisores de ruta han recibido las coordenadas de la anomalía.'
       });
@@ -635,47 +691,151 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
 
   return (
     <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 66px)', overflow: 'hidden' }}>
-      {/* Banner flotante superior para selección tocando en el mapa */}
-      {pickingMode && (
-        <div style={{
-          position: 'absolute',
-          top: '16px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1500,
-          background: 'rgba(15, 23, 42, 0.95)',
-          border: pickingMode === 'inmueble' ? '2px solid #38bdf8' : '2px solid #ef4444',
-          borderRadius: '16px',
-          padding: '10px 18px',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.85), 0 0 20px rgba(56, 189, 248, 0.4)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '14px',
-          backdropFilter: 'blur(16px)',
-          maxWidth: '92vw'
+      {/* Tarjeta de Acciones sobre el Punto Seleccionado (Lateral en PC, Bottom-Sheet en Móvil) */}
+      {clickedPoint && !showInmuebleModal && !showPqrsModal && (
+        <div className="eco-floating-drawer glass-panel" style={{
+          padding: '18px 20px',
+          background: 'rgba(11, 19, 25, 0.98)',
+          border: '1.5px solid rgba(16, 185, 129, 0.55)',
+          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.9), 0 0 25px rgba(16, 185, 129, 0.25)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Crosshair size={22} color={pickingMode === 'inmueble' ? '#38bdf8' : '#ef4444'} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.86rem', color: '#f8fafc' }}>
-                {pickingMode === 'inmueble' ? '👆 Toca en el mapa donde queda tu predio' : '👆 Toca en el mapa donde está la anomalía'}
+          {/* Cabecera con Nombre de Barrio y Botón Cerrar */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                background: 'rgba(16, 185, 129, 0.2)',
+                border: '1px solid #10b981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <MapPin size={18} color="#34d399" />
               </div>
-              <div style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
-                Haz clic en cualquier calle o esquina de Quibdó para marcar el punto exacto
+              <div>
+                <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: '#f8fafc' }}>
+                  {clickedPoint.barrio ? `Barrio ${clickedPoint.barrio}` : 'Ubicación en Quibdó'}
+                </h4>
+                <div style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                  GPS: {clickedPoint.lat.toFixed(5)}, {clickedPoint.lng.toFixed(5)}
+                </div>
               </div>
             </div>
+            <button
+              onClick={() => {
+                setClickedPoint(null);
+                setIsBottomCardCollapsed(false);
+              }}
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+              title="Cerrar y desmarcar punto"
+            >
+              <X size={20} />
+            </button>
           </div>
-          <button
-            onClick={() => {
-              if (pickingMode === 'inmueble') setShowInmuebleModal(true);
-              if (pickingMode === 'pqrs') setShowPqrsModal(true);
-              setPickingMode(null);
-            }}
-            className="btn btn-secondary"
-            style={{ padding: '6px 14px', fontSize: '0.75rem', fontWeight: 700 }}
-          >
-            Volver al Formulario
-          </button>
+
+          {/* Información y Validaciones Contextuales */}
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '10px',
+            padding: '10px 12px',
+            marginBottom: '14px',
+            fontSize: '0.77rem'
+          }}>
+            {inmuebleCercanoAlPunto ? (
+              <div style={{ color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Check size={15} color="#38bdf8" />
+                <span>Aquí tienes registrado tu predio: <b>{inmuebleCercanoAlPunto.etiqueta}</b></span>
+              </div>
+            ) : isPublic || !user ? (
+              <div style={{ color: '#fbbf24' }}>
+                ℹ️ <b>Modo Consulta:</b> Inicia sesión para vincular alertas de tu predio o radicar PQRS oficial.
+              </div>
+            ) : (
+              <div style={{ color: '#cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Predios registrados en tu cuenta:</span>
+                <span style={{ fontWeight: 800, color: inmuebles.length >= 3 ? '#ef4444' : '#34d399' }}>
+                  {inmuebles.length} / 3
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Botones de Acción Inmediata */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              onClick={() => {
+                if (isPublic || !user) {
+                  toast.info('Debes iniciar sesión para vincular y registrar un predio privado.');
+                  onOpenAuth?.();
+                  return;
+                }
+                if (inmuebles.length >= 3) {
+                  toast.error('Ya tienes el cupo máximo de 3 predios registrados.');
+                  return;
+                }
+                setNuevoInmuebleCoords({ lat: clickedPoint.lat, lng: clickedPoint.lng });
+                if (clickedPoint.barrio) setSelectedBarrioInmueble(clickedPoint.barrio);
+                setShowInmuebleModal(true);
+              }}
+              className="btn btn-primary"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+              }}
+            >
+              <MapPin size={16} />
+              <span>Registrar como Mi Predio Privado</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (isPublic || !user) {
+                  toast.info('Debes iniciar sesión para enviar un reporte cívico oficial.');
+                  onOpenAuth?.();
+                  return;
+                }
+                setPqrsCoords({ lat: clickedPoint.lat, lng: clickedPoint.lng });
+                if (clickedPoint.barrio) setSelectedBarrioPqrs(clickedPoint.barrio);
+                setShowPqrsModal(true);
+              }}
+              className="btn btn-danger"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+            >
+              <Camera size={16} />
+              <span>Reportar Incidencia o Basuras (PQRS)</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setClickedPoint(null);
+                setIsBottomCardCollapsed(false);
+              }}
+              className="btn btn-secondary"
+              style={{ width: '100%', padding: '7px 12px', fontSize: '0.76rem', color: '#94a3b8' }}
+            >
+              Desmarcar Punto
+            </button>
+          </div>
         </div>
       )}
 
@@ -733,17 +893,19 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
         puntosAcopio={puntosAcopio}
         selectedPoint={
           showInmuebleModal && nuevoInmuebleCoords
-            ? { ...nuevoInmuebleCoords, label: nuevoInmuebleEtiqueta || 'Mi Predio', color: '#38bdf8' }
+            ? { ...nuevoInmuebleCoords, label: nuevoInmuebleEtiqueta || (selectedBarrioInmueble ? `Predio: ${selectedBarrioInmueble}` : 'Mi Predio'), color: '#38bdf8' }
             : (showPqrsModal && pqrsCoords
                 ? { ...pqrsCoords, label: 'Incidencia PQRS', color: '#ef4444' }
-                : null)
+                : (clickedPoint
+                    ? { ...clickedPoint, label: clickedPoint.barrio ? `Barrio ${clickedPoint.barrio}` : 'Punto Marcado', color: '#10b981' }
+                    : null))
         }
         onMapClick={handleMapClick}
         height="100%"
       />
 
-      {/* InDrive-Style Core Floating Card (Limpio, sin apiñamiento) */}
-      {isBottomCardCollapsed ? (
+      {/* InDrive-Style Core Floating Card (Se oculta si hay un panel de acción o formulario abierto) */}
+      {!isAnyDrawerOpen && (isBottomCardCollapsed ? (
         /* Botón flotante píldora para volver a mostrar el panel */
         <button
           onClick={() => {
@@ -1110,36 +1272,28 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
             </span>
           </div>
         </div>
-      )}
+      ))}
 
-      {/* Modal Registrar Inmueble */}
-      {/* Modal Registrar Inmueble (Panel flotante interactivo, NO bloquea el mapa) */}
+      {/* Modal Registrar Inmueble (Panel flotante: lateral en PC, bottom-sheet en Móvil) */}
       {showInmuebleModal && (
-        <div style={{
-          position: 'fixed',
-          top: '72px',
-          right: '16px',
-          zIndex: 1100,
-          width: 'min(440px, calc(100vw - 32px))',
-          maxHeight: 'calc(100vh - 88px)',
-          overflowY: 'auto',
-          borderRadius: '16px',
-          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(56, 189, 248, 0.25)',
-          animation: 'fadeIn 0.2s ease-out'
+        <div className="eco-floating-drawer glass-panel" style={{
+          padding: '20px',
+          background: 'rgba(11, 19, 25, 0.98)',
+          border: '1.5px solid rgba(56, 189, 248, 0.55)',
+          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.9), 0 0 25px rgba(56, 189, 248, 0.25)'
         }}>
-          <div className="glass-panel modal-overlay-content" style={{ width: '100%', padding: '20px', background: 'rgba(11, 19, 25, 0.97)', border: '1.5px solid rgba(56, 189, 248, 0.5)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <h3 style={{ color: '#38bdf8', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
-                <MapPin size={20} /> Registrar Mi Predio Privado
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowInmuebleModal(false)}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <h3 style={{ color: '#38bdf8', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem' }}>
+              <MapPin size={20} /> Registrar Mi Predio Privado
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowInmuebleModal(false)}
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+            >
+              <X size={20} />
+            </button>
+          </div>
 
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: 1.4 }}>
               Fija tu casa, negocio o predio familiar en Quibdó para recibir alertas sonoras de aproximación del compactador.
@@ -1300,37 +1454,29 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
                 {isSubmittingInmueble ? 'Guardando...' : 'Guardar Mi Predio'}
               </button>
             </div>
-          </div>
         </div>
       )}
 
-      {/* Modal Reportar PQRS (Panel flotante interactivo, NO bloquea el mapa) */}
+      {/* Modal Reportar PQRS (Panel flotante: lateral en PC, bottom-sheet en Móvil) */}
       {showPqrsModal && (
-        <div style={{
-          position: 'fixed',
-          top: '72px',
-          right: '16px',
-          zIndex: 1100,
-          width: 'min(440px, calc(100vw - 32px))',
-          maxHeight: 'calc(100vh - 88px)',
-          overflowY: 'auto',
-          borderRadius: '16px',
-          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.85), 0 0 25px rgba(239, 68, 68, 0.25)',
-          animation: 'fadeIn 0.2s ease-out'
+        <div className="eco-floating-drawer glass-panel" style={{
+          padding: '20px',
+          background: 'rgba(11, 19, 25, 0.98)',
+          border: '1.5px solid rgba(239, 68, 68, 0.55)',
+          boxShadow: '0 16px 50px rgba(0, 0, 0, 0.9), 0 0 25px rgba(239, 68, 68, 0.25)'
         }}>
-          <div className="glass-panel modal-overlay-content" style={{ width: '100%', padding: '20px', background: 'rgba(11, 19, 25, 0.97)', border: '1.5px solid rgba(239, 68, 68, 0.5)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <h3 style={{ color: '#ef4444', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
-                <Camera size={20} /> Reporte Fotográfico Cívico (PQRS)
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowPqrsModal(false)}
-                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <h3 style={{ color: '#ef4444', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.05rem' }}>
+              <Camera size={20} /> Reporte Fotográfico Cívico (PQRS)
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowPqrsModal(false)}
+              style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '4px' }}
+            >
+              <X size={20} />
+            </button>
+          </div>
 
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: 1.4 }}>
               Reporta anomalías de aseo en Quibdó (botaderos, escombros, camión que no pasó) directamente al equipo de despacho.
@@ -1544,7 +1690,6 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
                 <span>{isSubmittingPqrs ? 'Enviando...' : 'Enviar Reporte Cívico'}</span>
               </button>
             </div>
-          </div>
         </div>
       )}
 
