@@ -122,6 +122,16 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const animFrameRef = useRef<number | null>(null);
   const currentPosRef = useRef<{ lat: number; lng: number; heading: number } | null>(null);
 
+  const onMapClickRef = useRef(onMapClick);
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
+
+  const onAddPointRef = useRef(onAddPoint);
+  useEffect(() => {
+    onAddPointRef.current = onAddPoint;
+  }, [onAddPoint]);
+
   // Inicializar mapa de Quibdó
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
@@ -152,8 +162,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
     // Click handler
     map.on('click', (e: L.LeafletMouseEvent) => {
-      if (onMapClick) onMapClick(e.latlng.lat, e.latlng.lng);
-      if (onAddPoint) onAddPoint(e.latlng.lat, e.latlng.lng);
+      if (onMapClickRef.current) onMapClickRef.current(e.latlng.lat, e.latlng.lng);
+      if (onAddPointRef.current) onAddPointRef.current(e.latlng.lat, e.latlng.lng);
     });
 
     mapInstanceRef.current = map;
