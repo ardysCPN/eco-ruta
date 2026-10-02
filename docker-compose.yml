@@ -1,0 +1,65 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: eco_ruta_postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eco_ruta_db}
+      POSTGRES_USER: ${POSTGRES_USER:-eco_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eco_secure_password_2026}
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./infra/init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eco_admin} -d ${POSTGRES_DB:-eco_ruta_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eco_net
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: eco_ruta_server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${SERVER_PORT:-3005}
+      HOST: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-eco_admin}:${POSTGRES_PASSWORD:-eco_secure_password_2026}@postgres:5432/${POSTGRES_DB:-eco_ruta_db}}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      - "${SERVER_PORT:-3005}:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - eco_net
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: eco_ruta_web
+    restart: unless-stopped
+    environment:
+      BACKEND_HOST: ${BACKEND_HOST:-server}
+      BACKEND_PORT: ${SERVER_PORT:-3005}
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - server
+    networks:
+      - eco_net
+
+volumes:
+  postgis_data:
+    driver: local
+
+networks:
+  eco_net:
+    driver: bridge

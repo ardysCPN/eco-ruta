@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="40" fill="#0b1319" />
+  <circle cx="96" cy="96" r="76" fill="url(#ecoGrad)" />
+  <defs>
+    <linearGradient id="ecoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <path d="M136 68H122V58c0-3.3-2.7-6-6-6H64c-3.3 0-6 2.7-6 6v64h10c0 7.7 6.3 14 14 14s14-6.3 14-14h24c0 7.7 6.3 14 14 14s14-6.3 14-14h4c3.3 0 6-2.7 6-6V90l-18-22zm-54-4v18H68V64h14zm0 28v18H68V92h14zm38-16 12 16h-24V76h12zM82 126c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zm48 0c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8z" fill="#ffffff" />
+</svg>
