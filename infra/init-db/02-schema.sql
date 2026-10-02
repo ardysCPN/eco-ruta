@@ -164,3 +164,22 @@ CREATE TABLE IF NOT EXISTS material_aprovechable (
     creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_reciclaje_punto ON material_aprovechable USING GIST (punto);
+
+-- Tabla de División Territorial Oficial de Quibdó (6 Comunas Urbanas, Corregimientos, Barrios y Sectores)
+CREATE TABLE IF NOT EXISTS territorio_quibdo (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tipo VARCHAR(30) NOT NULL DEFAULT 'comuna_urbana', -- comuna_urbana | corregimiento_rural
+    comuna VARCHAR(100) NOT NULL,
+    nombre_zona VARCHAR(150) NOT NULL,
+    barrio VARCHAR(120) NOT NULL,
+    sector VARCHAR(120),
+    lat NUMERIC(10, 6) NOT NULL,
+    lng NUMERIC(10, 6) NOT NULL,
+    punto GEOMETRY(Point, 4326),
+    descripcion TEXT,
+    creado_en TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_territorio_comuna ON territorio_quibdo(comuna);
+CREATE INDEX IF NOT EXISTS idx_territorio_barrio ON territorio_quibdo(barrio);
+CREATE INDEX IF NOT EXISTS idx_territorio_punto ON territorio_quibdo USING GIST (punto);
+

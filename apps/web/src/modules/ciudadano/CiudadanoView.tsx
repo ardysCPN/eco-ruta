@@ -730,31 +730,44 @@ export const CiudadanoView: React.FC<CiudadanoViewProps> = ({ isPublic = false, 
                 </span>
               )}
             </div>
-            <select
-              className="input-control"
-              style={{
-                width: '100%',
-                fontSize: '0.82rem',
-                padding: '7px 10px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
+            {rutas.length === 0 ? (
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px dashed rgba(255, 255, 255, 0.15)',
                 borderRadius: '8px',
-                color: '#f8fafc',
-                textOverflow: 'ellipsis'
-              }}
-              value={selectedRutaId}
-              onChange={(e) => {
-                setSelectedRutaId(e.target.value);
-                const r = rutas.find((item) => item.id === e.target.value);
-                if (r) toast.info(`Ruta seleccionada: ${r.nombre}`);
-              }}
-            >
-              {rutas.map((r) => (
-                <option key={r.id} value={r.id} style={{ background: '#0b1319', color: '#f8fafc' }}>
-                  {r.nombre} ({r.comuna})
-                </option>
-              ))}
-            </select>
+                padding: '8px 10px',
+                fontSize: '0.75rem',
+                color: 'var(--text-muted)'
+              }}>
+                ℹ️ Sin micro-rutas registradas aún. Puedes fijar tu predio familiar en el mapa de Quibdó para recibir alertas sonoras apenas el camión inicie marcha.
+              </div>
+            ) : (
+              <select
+                className="input-control"
+                style={{
+                  width: '100%',
+                  fontSize: '0.82rem',
+                  padding: '7px 10px',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '8px',
+                  color: '#f8fafc',
+                  textOverflow: 'ellipsis'
+                }}
+                value={selectedRutaId}
+                onChange={(e) => {
+                  setSelectedRutaId(e.target.value);
+                  const r = rutas.find((item) => item.id === e.target.value);
+                  if (r) toast.info(`Ruta seleccionada: ${r.nombre}`);
+                }}
+              >
+                {rutas.map((r) => (
+                  <option key={r.id} value={r.id} style={{ background: '#0b1319', color: '#f8fafc' }}>
+                    {r.nombre} ({r.comuna})
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Fila 3: Selector de Predios Rápidos (si el ciudadano tiene predios) */}

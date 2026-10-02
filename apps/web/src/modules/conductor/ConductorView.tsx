@@ -607,42 +607,68 @@ export const ConductorView: React.FC = () => {
             )}
           </div>
 
-          <div className="grid-responsive-2" style={{ marginBottom: '14px' }}>
-            <div>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ruta Asignada:</label>
-              <select
-                className="input-control"
-                value={selectedRuta}
-                onChange={(e) => setSelectedRuta(e.target.value)}
-              >
-                {rutasConductor.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.nombre} ({r.comuna}) - {r.horario_estimado || 'Horario Oficial'}
-                  </option>
-                ))}
-              </select>
+          {rutasConductor.length === 0 ? (
+            <div style={{
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid #f59e0b',
+              borderRadius: '10px',
+              padding: '14px',
+              marginBottom: '14px',
+              color: '#fef3c7',
+              fontSize: '0.84rem',
+              lineHeight: 1.5
+            }}>
+              <b style={{ color: '#fbbf24' }}>📍 No hay micro-rutas registradas todavía en Quibdó.</b>
+              <p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#fde68a' }}>
+                Para probar tu recorrido (ej. <i>Oficina a Casa</i>), ingresa al módulo <b>Operaciones</b> &rarr; pestaña <b>Diseñar Rutas por Calles (OSRM)</b>, haz clic en las calles por donde transitarás y presiona <b>Guardar Ruta</b>. Tu ruta aparecerá aquí al instante para iniciar tu turno.
+              </p>
             </div>
+          ) : (
+            <div className="grid-responsive-2" style={{ marginBottom: '14px' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Ruta Asignada:</label>
+                <select
+                  className="input-control"
+                  value={selectedRuta}
+                  onChange={(e) => setSelectedRuta(e.target.value)}
+                >
+                  {rutasConductor.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.nombre} ({r.comuna}) - {r.horario_estimado || 'Horario Oficial'}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Compactador:</label>
-              <select
-                className="input-control"
-                value={selectedVehiculo}
-                onChange={(e) => setSelectedVehiculo(e.target.value)}
-              >
-                {vehiculos.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.codigo} ({v.placa}) - {v.capacidad_ton} Ton
-                  </option>
-                ))}
-              </select>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Compactador:</label>
+                <select
+                  className="input-control"
+                  value={selectedVehiculo}
+                  onChange={(e) => setSelectedVehiculo(e.target.value)}
+                >
+                  {vehiculos.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.codigo} ({v.placa}) - {v.capacidad_ton} Ton
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
 
           <button
             onClick={handleIniciarTurno}
+            disabled={rutasConductor.length === 0}
             className="btn btn-primary"
-            style={{ width: '100%', padding: '14px', fontSize: '1rem', fontWeight: 800 }}
+            style={{ 
+              width: '100%', 
+              padding: '14px', 
+              fontSize: '1rem', 
+              fontWeight: 800,
+              opacity: rutasConductor.length === 0 ? 0.45 : 1,
+              cursor: rutasConductor.length === 0 ? 'not-allowed' : 'pointer'
+            }}
           >
             <Play size={20} />
             <span>INICIAR TURNO DE RECOLECCIÓN</span>

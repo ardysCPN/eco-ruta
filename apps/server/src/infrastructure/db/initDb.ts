@@ -27,21 +27,22 @@ export async function ensureDatabaseReady() {
     throw new Error('❌ No fue posible conectar con PostgreSQL después de 30 segundos.');
   }
 
-  // Verificar si las tablas existen
+  // 1. Verificar si las tablas existen
   try {
     const tableCheck = await query(`
-      SELECT to_regclass('public.rutas') as exists_rutas;
+      SELECT to_regclass('public.rutas') as exists_rutas,
+             to_regclass('public.territorio_quibdo') as exists_territorio;
     `);
 
-    const hasTables = tableCheck.rows[0]?.exists_rutas !== null;
+    const hasTables = tableCheck.rows[0]?.exists_rutas !== null && tableCheck.rows[0]?.exists_territorio !== null;
 
     if (!hasTables) {
-      console.log('📦 Tablas no encontradas. Ejecutando migraciones iniciales (schema.sql)...');
-      // Buscar schema.sql en varias rutas relativas posibles
+      console.log('📦 Tablas no encontradas. Ejecutando estructura DDL inicial (schema.sql)...');
       const possiblePaths = [
         path.join(__dirname, 'schema.sql'),
         path.join(__dirname, '../../../../src/infrastructure/db/schema.sql'),
-        path.join(__dirname, '../../../apps/server/src/infrastructure/db/schema.sql')
+        path.join(__dirname, '../../../apps/server/src/infrastructure/db/schema.sql'),
+        path.join(__dirname, '../../../../infra/init-db/02-schema.sql')
       ];
 
       let schemaSql = '';
@@ -61,7 +62,39 @@ export async function ensureDatabaseReady() {
     } else {
       console.log('✅ Esquema y tablas de PostGIS ya inicializados.');
     }
+
+    // 2. Verificar y sembrar división territorial completa de Quibdó (6 Comunas + Corregimientos)
+    const terrCheck = await query(`SELECT count(*) as total FROM territorio_quibdo`);
+    const totalTerritorio = Number(terrCheck.rows[0]?.total || 0);
+
+    if (totalTerritorio === 0) {
+      console.log('🌱 Sembrando división territorial completa de Quibdó (6 Comunas + Corregimientos)...');
+      const seedPaths = [
+        path.join(__dirname, '03-seed-quibdo.sql'),
+        path.join(__dirname, '../../../../infra/init-db/03-seed-quibdo.sql'),
+        path.join(__dirname, '../../../infra/init-db/03-seed-quibdo.sql'),
+        path.join(__dirname, '../../../../apps/server/src/infrastructure/db/03-seed-quibdo.sql')
+      ];
+
+      let seedSql = '';
+      for (const sp of seedPaths) {
+        if (fs.existsSync(sp)) {
+          seedSql = fs.readFileSync(sp, 'utf-8');
+          break;
+        }
+      }
+
+      if (seedSql) {
+        await query(seedSql);
+        console.log('✅ Territorio de Quibdó, flota de compactadores y usuarios base sembrados.');
+        console.log('🚚 Rutas oficiales permanecen en 0 para registro manual dinámico.');
+      } else {
+        console.warn('⚠️ No se encontró 03-seed-quibdo.sql.');
+      }
+    } else {
+      console.log(`✅ Territorio de Quibdó activo (${totalTerritorio} barrios y sectores).`);
+    }
   } catch (err: any) {
-    console.warn('⚠️ Nota sobre verificación de esquema:', err.message);
+    console.warn('⚠️ Nota sobre verificación de esquema y siembra:', err.message);
   }
 }

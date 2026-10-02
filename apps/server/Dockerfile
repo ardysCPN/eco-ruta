@@ -49,6 +49,7 @@ COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
 COPY --from=builder /app/apps/server/package.json ./apps/server/package.json
 COPY --from=builder /app/apps/server/src/infrastructure/db/schema.sql ./apps/server/dist/infrastructure/db/schema.sql
+COPY --from=builder /app/apps/server/src/infrastructure/db/03-seed-quibdo.sql ./apps/server/dist/infrastructure/db/03-seed-quibdo.sql
 
 # Asignar permisos
 RUN chown -R ecoruta:ecoruta /app

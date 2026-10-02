@@ -44,6 +44,11 @@ export const registerApiRoutes = async (fastify: FastifyInstance, opts: ApiRoute
     return { data: COMUNAS_QUIBDO };
   });
 
+  fastify.get<{ Querystring: { comuna?: string } }>('/territorio', async (req) => {
+    const data = await repository.listarTerritorio(req.query.comuna);
+    return { data };
+  });
+
   fastify.post('/auth/register', async (req, reply) => {
     const parsed = RegistroUsuarioSchema.safeParse(req.body);
     if (!parsed.success) {

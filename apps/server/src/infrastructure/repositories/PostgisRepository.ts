@@ -929,4 +929,17 @@ export class PostgisRepository {
 
     return rutaCreada;
   }
+
+  // ===================== DIVISIÓN TERRITORIAL DE QUIBDÓ =====================
+  async listarTerritorio(comuna?: string) {
+    let sql = `SELECT id, tipo, comuna, nombre_zona, barrio, sector, lat, lng, descripcion FROM territorio_quibdo`;
+    const params: any[] = [];
+    if (comuna) {
+      sql += ` WHERE comuna = $1`;
+      params.push(comuna);
+    }
+    sql += ` ORDER BY comuna ASC, barrio ASC`;
+    const res = await query(sql, params);
+    return res.rows;
+  }
 }
