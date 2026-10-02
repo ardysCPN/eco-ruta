@@ -47,6 +47,7 @@ COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.json
 COPY --from=builder /app/apps/server/dist ./apps/server/dist
 COPY --from=builder /app/apps/server/package.json ./apps/server/package.json
+COPY --from=builder /app/apps/server/src/infrastructure/db/schema.sql ./apps/server/dist/infrastructure/db/schema.sql
 
 # Asignar permisos
 RUN chown -R ecoruta:ecoruta /app

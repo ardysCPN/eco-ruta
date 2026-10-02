@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { PostgisRepository } from './infrastructure/repositories/PostgisRepository.js';
 import { SocketServer } from './infrastructure/websocket/SocketServer.js';
 import { registerApiRoutes } from './presentation/routes/api.js';
+import { ensureDatabaseReady } from './infrastructure/db/initDb.js';
 
 dotenv.config();
 
@@ -39,6 +40,9 @@ async function bootstrap() {
       done(err, undefined);
     }
   });
+
+  // Asegurar conectividad con base de datos PostGIS y esquema inicial
+  await ensureDatabaseReady();
 
   // Repositorio e infraestructura
   const repository = new PostgisRepository();
