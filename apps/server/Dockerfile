@@ -9,15 +9,16 @@ WORKDIR /app
 # Instalar dependencias globales necesarias
 RUN apk add --no-cache python3 make g++
 
-# Copiar manifiestos de paquetes monorepo
+# Copiar manifiestos de paquetes monorepo para resolver dependencias
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/server/package.json ./apps/server/
+COPY apps/web/package.json ./apps/web/
 
-# Instalar todas las dependencias para compilar
+# Instalar todas las dependencias del monorepo
 RUN npm ci
 
-# Copiar código fuente
+# Copiar configuración y código fuente
 COPY tsconfig.json ./
 COPY packages/shared ./packages/shared
 COPY apps/server ./apps/server

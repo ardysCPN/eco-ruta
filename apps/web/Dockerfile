@@ -6,15 +6,16 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Copiar manifiestos de paquetes
+# Copiar manifiestos de paquetes monorepo para resolver dependencias
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY apps/server/package.json ./apps/server/
 COPY apps/web/package.json ./apps/web/
 
 # Instalar dependencias
 RUN npm ci
 
-# Copiar código fuente
+# Copiar configuración y código fuente
 COPY tsconfig.json ./
 COPY packages/shared ./packages/shared
 COPY apps/web ./apps/web
