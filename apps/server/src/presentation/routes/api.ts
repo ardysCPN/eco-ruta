@@ -400,7 +400,8 @@ export const registerApiRoutes = async (fastify: FastifyInstance, opts: ApiRoute
       const turno = await repository.iniciarTurno(
         parsed.data.vehiculo_id,
         parsed.data.ruta_id,
-        parsed.data.conductor_nombre
+        parsed.data.conductor_nombre,
+        (req.body as any)?.conductor_id
       );
       // Iniciar automáticamente la transmisión de telemetría de la ruta asignada
       await startTurnoTelemetry(turno);
@@ -504,29 +505,77 @@ export const registerApiRoutes = async (fastify: FastifyInstance, opts: ApiRoute
     }
 
     try {
-      // OSRM espera {lng},{lat}; si vienen como [lat, lng] (lat > 0 en Quibdó ~ 5.69, lng < 0 ~ -76.66)
-      const coordString = waypoints.map((p) => {
-        const lat = p[0] > 0 ? p[0] : p[1];
-        const lng = p[0] > 0 ? p[1] : p[0];
-        return `${lng},${lat}`;
-      }).join(';');
+      // Cálculo tramo a tramo (segment-by-segment) para que OSRM siga las curvas reales de cada calle
+      // pero intercepte y rechace desvíos gigantes hacia otros barrios no deseados.
+      const allCoords: Array<[number, number]> = [];
+      let totalDistanciaMeters = 0;
+      let totalDurationSeconds = 0;
 
-      const url = `http://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
-      
-      const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (response.ok) {
-        const json: any = await response.json();
-        if (json.routes && json.routes.length > 0) {
-          const route = json.routes[0];
-          return {
-            data: {
-              trazado_geojson: route.geometry,
-              distancia_km: Number((route.distance / 1000).toFixed(2)),
-              duracion_min: Math.round(route.duration / 60)
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const p1 = waypoints[i];
+        const p2 = waypoints[i + 1];
+        const lat1 = p1[0] > 0 ? p1[0] : p1[1];
+        const lng1 = p1[0] > 0 ? p1[1] : p1[0];
+        const lat2 = p2[0] > 0 ? p2[0] : p2[1];
+        const lng2 = p2[0] > 0 ? p2[1] : p2[0];
+
+        // Distancia euclidiana directa en metros
+        const dLat = (lat2 - lat1) * 111320;
+        const dLng = (lng2 - lng1) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+        const distDirectaMeters = Math.sqrt(dLat * dLat + dLng * dLng);
+
+        let tramoCoords: Array<[number, number]> = [];
+        let tramoDist = distDirectaMeters;
+        let tramoDuration = Math.round((distDirectaMeters / 18000) * 3600); // 18 km/h en Quibdó
+
+        try {
+          // Radiuses de 45m para evitar saltar a avenidas paralelas y continue_straight=false para no forzar vueltas
+          const url = `http://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson&continue_straight=false&radiuses=45;45`;
+          const response = await fetch(url, { signal: AbortSignal.timeout(3500) });
+          if (response.ok) {
+            const json: any = await response.json();
+            if (json.routes && json.routes.length > 0) {
+              const route = json.routes[0];
+              // Protección anti-desvíos: Si OSRM hace un rodeo desmesurado (> 2.3 veces la distancia directa),
+              // significa que entró a un barrio contiguo por restricciones de OSM. Rechazar el desvío.
+              const threshold = Math.max(350, distDirectaMeters * 2.3);
+              if (route.distance <= threshold) {
+                tramoCoords = route.geometry.coordinates; // [[lng, lat], ...]
+                tramoDist = route.distance;
+                tramoDuration = route.duration;
+              }
             }
-          };
+          }
+        } catch {
+          // Fallback silencioso si OSRM no responde a tiempo
+        }
+
+        // Si OSRM intentó un rodeo hacia otro barrio o falló, conectar fielmente los puntos
+        if (tramoCoords.length === 0) {
+          tramoCoords = [[lng1, lat1], [lng2, lat2]];
+        }
+
+        totalDistanciaMeters += tramoDist;
+        totalDurationSeconds += tramoDuration;
+
+        if (allCoords.length === 0) {
+          allCoords.push(...tramoCoords);
+        } else {
+          // Evitar duplicar el punto de unión entre tramos consecutivos
+          allCoords.push(...tramoCoords.slice(1));
         }
       }
+
+      return {
+        data: {
+          trazado_geojson: {
+            type: 'LineString',
+            coordinates: allCoords
+          },
+          distancia_km: Number((totalDistanciaMeters / 1000).toFixed(2)),
+          duracion_min: Math.max(5, Math.round(totalDurationSeconds / 60))
+        }
+      };
     } catch (e: any) {
       console.warn('⚠️ OSRM fallback a interpolación directa en Quibdó:', e.message);
     }

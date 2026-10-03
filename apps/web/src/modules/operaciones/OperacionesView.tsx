@@ -93,6 +93,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
   const [progAyudante2, setProgAyudante2] = useState('Jhon Jairo Moreno');
   const [progBarrendero, setProgBarrendero] = useState('Carmen Córdoba');
   const [filtroDias, setFiltroDias] = useState<number>(30);
+  const [guardandoTurno, setGuardandoTurno] = useState(false);
 
   // Diseñador de Rutas por Calles (OSRM)
   const [disenadorPuntos, setDisenadorPuntos] = useState<[number, number][]>([]);
@@ -173,23 +174,37 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
       toast.error('Completa los campos obligatorios del turno.');
       return;
     }
+    if (guardandoTurno) return;
 
+    setGuardandoTurno(true);
     try {
-      await api.planificarTurno({
+      const conductorObj = empleados.find((emp) =>
+        `${emp.nombre} ${emp.apellidos || ''}`.trim().toLowerCase() === progConductor.trim().toLowerCase() ||
+        emp.nombre.toLowerCase() === progConductor.trim().toLowerCase()
+      );
+
+      const res = await api.planificarTurno({
         ruta_id: progRuta,
         vehiculo_id: progVehiculo,
         conductor_nombre: progConductor,
-        ayudante_1: progAyudante1,
-        ayudante_2: progAyudante2,
-        barrendero: progBarrendero,
+        conductor_id: conductorObj?.id,
+        ayudante_1: progAyudante1 || 'Sin asignar',
+        ayudante_2: progAyudante2 || 'Sin asignar',
+        barrendero: progBarrendero || 'Sin asignar',
         fecha_programada: fechaProg,
         observaciones: 'Programación oficial Aguas del Atrato'
       });
 
-      toast.success(`Turno programado exitosamente para el ${fechaProg}`);
+      if (res.data?.fueActualizado) {
+        toast.success(`Turno del ${fechaProg} actualizado para la ruta y vehículo seleccionados (sin duplicados).`);
+      } else {
+        toast.success(`Turno programado exitosamente para el ${fechaProg}`);
+      }
       refreshData();
     } catch (err: any) {
       toast.error(err.message || 'Error al planificar turno');
+    } finally {
+      setGuardandoTurno(false);
     }
   };
 
@@ -295,94 +310,24 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
     toast.info('Puntos de referencia de Quibdó cargados en el mapa.');
   };
 
-  // Trazado Exacto Directo por Puntos (Sigue solo las paradas marcadas, sin desvíos en otros barrios)
-  const handleTrazarDirectoPorPuntos = () => {
-    if (disenadorPuntos.length < 2) {
-      toast.error('Agrega al menos 2 puntos en el mapa para trazar una ruta.');
-      return;
-    }
-
-    // Coordenadas GeoJSON LineString [lng, lat]
-    const coordsGeoJson = disenadorPuntos.map((p) => {
-      const lat = p[0] > 0 ? p[0] : p[1];
-      const lng = p[0] > 0 ? p[1] : p[0];
-      return [lng, lat];
-    });
-
-    const geoJsonFeature = {
-      type: 'Feature',
-      geometry: {
-        type: 'LineString',
-        coordinates: coordsGeoJson
-      },
-      properties: {
-        modo: 'exacto_por_puntos'
-      }
-    };
-
-    // Calcular distancia Haversine acumulada punto a punto en Quibdó
-    let distKm = 0;
-    for (let i = 0; i < disenadorPuntos.length - 1; i++) {
-      const p1 = disenadorPuntos[i];
-      const p2 = disenadorPuntos[i + 1];
-      const lat1 = p1[0] > 0 ? p1[0] : p1[1];
-      const lng1 = p1[0] > 0 ? p1[1] : p1[0];
-      const lat2 = p2[0] > 0 ? p2[0] : p2[1];
-      const lng2 = p2[0] > 0 ? p2[1] : p2[0];
-      const dLat = (lat2 - lat1) * 111.32;
-      const dLng = (lng2 - lng1) * 111.32 * Math.cos((lat1 * Math.PI) / 180);
-      distKm += Math.sqrt(dLat * dLat + dLng * dLng);
-    }
-
-    const durMin = Math.max(10, Math.round((distKm / 18) * 60) + (disenadorPuntos.length * 2));
-
-    setTrazadoCalculado(geoJsonFeature);
-    setDistanciaKm(distKm.toFixed(2));
-    setDuracionMin(durMin);
-
-    // Detección automática de comunas atravesadas por los puntos
-    const comunasDetectadas = detectarComunasDeTrazado(disenadorPuntos);
-    if (comunasDetectadas.length > 0) {
-      const nombres = comunasDetectadas.map((c) => c.nombre);
-      setComunasSeleccionadas(nombres);
-      setNuevaRutaComuna(nombres.map(c => c.split(' (')[0]).join(', '));
-      toast.success(`📍 Trazado exacto generado: ${distKm.toFixed(2)} km siguiendo fielmente tus ${disenadorPuntos.length} puntos. Comunas detectadas: ${comunasDetectadas.map(c => c.nombre.split(' (')[0]).join(', ')}.`);
-    } else {
-      toast.success(`📍 Trazado exacto generado: ${distKm.toFixed(2)} km siguiendo fielmente tus ${disenadorPuntos.length} puntos.`);
-    }
-  };
-
   // Deshacer último punto marcado en el diseñador
   const handleDeshacerPunto = () => {
     if (disenadorPuntos.length === 0) return;
     const nuevos = disenadorPuntos.slice(0, -1);
     setDisenadorPuntos(nuevos);
+    setTrazadoCalculado(null);
+    setDistanciaKm(null);
+    setDuracionMin(null);
 
-    if (nuevos.length < 2) {
-      setTrazadoCalculado(null);
-      setDistanciaKm(null);
-      setDuracionMin(null);
-    } else if (trazadoCalculado) {
-      const coordsGeoJson = nuevos.map((p) => {
-        const lat = p[0] > 0 ? p[0] : p[1];
-        const lng = p[0] > 0 ? p[1] : p[0];
-        return [lng, lat];
-      });
-      setTrazadoCalculado({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: coordsGeoJson },
-        properties: {}
-      });
-      const comunasDetectadas = detectarComunasDeTrazado(nuevos);
-      if (comunasDetectadas.length > 0) {
-        setComunasSeleccionadas(comunasDetectadas.map((c) => c.nombre));
-        setNuevaRutaComuna(comunasDetectadas.map((c) => c.nombre.split(' (')[0]).join(', '));
-      }
+    const comunasDetectadas = detectarComunasDeTrazado(nuevos);
+    if (comunasDetectadas.length > 0) {
+      setComunasSeleccionadas(comunasDetectadas.map((c) => c.nombre));
+      setNuevaRutaComuna(comunasDetectadas.map((c) => c.nombre.split(' (')[0]).join(', '));
     }
-    toast.info('Último punto eliminado.');
+    toast.info('Último punto eliminado. Haz clic en "⚡ Trazar Ruta por Calles (OSRM)" para actualizar el trazado.');
   };
 
-  // Calcular Trazado OSRM por Calles
+  // Calcular Trazado OSRM por Calles (Sigue las curvas reales de las calles de Quibdó sin desvíos a otros barrios)
   const handleCalcularTrazado = async () => {
     if (disenadorPuntos.length < 2) {
       toast.error('Agrega al menos 2 puntos en el mapa para trazar una ruta.');
@@ -404,7 +349,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
         setNuevaRutaComuna(nombres.map(c => c.split(' (')[0]).join(', '));
       }
 
-      toast.success(`Trazado vial OSRM calculado: ${res.data.distancia_km.toFixed(2)} km siguiendo las calles reales.`);
+      toast.success(`Trazado vial OSRM calculado: ${res.data.distancia_km.toFixed(2)} km siguiendo las calles reales sin desvíos.`);
     } catch (err: any) {
       toast.error(err.message || 'Error al calcular ruta con OSRM');
     } finally {
@@ -420,7 +365,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
       return;
     }
     if (!trazadoCalculado) {
-      toast.error('Primero genera el trazado de la ruta (Directo por Puntos o por OSRM).');
+      toast.error('Primero genera el trazado de la ruta haciendo clic en "⚡ Trazar Ruta por Calles (OSRM)".');
       return;
     }
 
@@ -835,11 +780,19 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
 
                   <button
                     type="submit"
+                    disabled={guardandoTurno}
                     className="btn btn-primary"
-                    style={{ width: '100%', padding: '12px', fontSize: '0.95rem', fontWeight: 800 }}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      fontSize: '0.95rem',
+                      fontWeight: 800,
+                      opacity: guardandoTurno ? 0.7 : 1,
+                      cursor: guardandoTurno ? 'wait' : 'pointer'
+                    }}
                   >
                     <Save size={18} />
-                    <span>Guardar Asignación de Turno & Cuadrilla</span>
+                    <span>{guardandoTurno ? 'Guardando Asignación...' : 'Guardar Asignación de Turno & Cuadrilla'}</span>
                   </button>
                 </form>
               </div>
@@ -1001,31 +954,22 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
 
                     <button
                       type="button"
-                      disabled={disenadorPuntos.length < 2}
-                      onClick={handleTrazarDirectoPorPuntos}
-                      className="btn btn-primary"
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
-                        background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
-                      }}
-                      title="Genera el trazado guiado 100% por tus paradas, sin tomar desvíos hacia otros barrios"
-                    >
-                      <Check size={14} />
-                      <span>📍 Trazar Exacto por Puntos (Recomendado)</span>
-                    </button>
-
-                    <button
-                      type="button"
                       disabled={disenadorPuntos.length < 2 || calculandoRuta}
                       onClick={handleCalcularTrazado}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '0.78rem' }}
-                      title="Intenta conectar por calles calculadas por OSRM"
+                      className="btn btn-primary"
+                      style={{
+                        padding: '7px 16px',
+                        fontSize: '0.82rem',
+                        fontWeight: 800,
+                        background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                      title="Calcula el trazado siguiendo las curvas reales de las calles de Quibdó (OSRM) sin rodeos innecesarios"
                     >
-                      <Zap size={14} />
-                      <span>{calculandoRuta ? 'Calculando...' : '⚡ Calles (OSRM)'}</span>
+                      <Zap size={15} />
+                      <span>{calculandoRuta ? 'Calculando calles reales...' : '⚡ Trazar Ruta por Calles (OSRM)'}</span>
                     </button>
                   </div>
                 </div>

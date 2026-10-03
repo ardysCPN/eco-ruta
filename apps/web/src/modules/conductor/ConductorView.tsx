@@ -242,13 +242,29 @@ export const ConductorView: React.FC = () => {
     } catch {}
   };
 
+  // Rutas y Vehículos asignados estrictamente a este conductor por Despacho EPQ
+  const tieneTurnosAsignados = turnosAsignados.length > 0;
+
+  const rutasConductor = (tieneTurnosAsignados && !modoLibreAdmin)
+    ? (rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id)).length > 0
+        ? rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id))
+        : turnosAsignados.map(t => ({ id: t.ruta_id, nombre: t.ruta_nombre, comuna: t.ruta_comuna, horario_estimado: t.horario_estimado, trazado_geojson: t.trazado_geojson })))
+    : rutas;
+
+  const vehiculosConductor = (tieneTurnosAsignados && !modoLibreAdmin)
+    ? vehiculos.filter((v) => turnosAsignados.some((t) => t.vehiculo_id === v.id))
+    : vehiculos;
+
+  const turnoAsignadoSeleccionado = turnosAsignados.find((t) => t.ruta_id === selectedRuta) || turnosAsignados[0] || null;
+
   // Iniciar turno
   const handleIniciarTurno = async () => {
     try {
       const res = await api.iniciarTurno({
         ruta_id: selectedRuta,
         vehiculo_id: selectedVehiculo,
-        conductor_nombre: user?.nombre ? `${user.nombre} ${user.apellidos}` : 'Carlos Palacios'
+        conductor_nombre: turnoAsignadoSeleccionado?.conductor_nombre || (user?.nombre ? `${user.nombre} ${user.apellidos || ''}`.trim() : 'Carlos Palacios'),
+        conductor_id: user?.id
       });
       setTurnoActivo(res.data);
       requestWakeLock();
@@ -329,10 +345,10 @@ export const ConductorView: React.FC = () => {
 
   // Determinar datos de cuadrilla para mostrar
   const cuadrillaInfo = {
-    conductor: user?.nombre ? `${user.nombre} ${user.apellidos}` : 'Carlos Palacios',
-    ayudante1: turnoActivo?.ayudante_1 || 'Hamilton Rivas',
-    ayudante2: turnoActivo?.ayudante_2 || 'Jhon Jairo Moreno',
-    barrendero: turnoActivo?.barrendero || 'Carmen Córdoba'
+    conductor: turnoActivo?.conductor_nombre || turnoAsignadoSeleccionado?.conductor_nombre || (user?.nombre ? `${user.nombre} ${user.apellidos || ''}`.trim() : 'Carlos Palacios'),
+    ayudante1: turnoActivo?.ayudante_1 || turnoAsignadoSeleccionado?.ayudante_1 || 'Sin asignar',
+    ayudante2: turnoActivo?.ayudante_2 || turnoAsignadoSeleccionado?.ayudante_2 || 'Sin asignar',
+    barrendero: turnoActivo?.barrendero || turnoAsignadoSeleccionado?.barrendero || 'Sin asignar'
   };
 
   // Si no está autenticado como conductor, mostrar pantalla de PIN
@@ -406,20 +422,7 @@ export const ConductorView: React.FC = () => {
     );
   }
 
-  // Rutas y Vehículos asignados estrictamente a este conductor por Despacho EPQ
-  const tieneTurnosAsignados = turnosAsignados.length > 0;
 
-  const rutasConductor = (tieneTurnosAsignados && !modoLibreAdmin)
-    ? (rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id)).length > 0
-        ? rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id))
-        : turnosAsignados.map(t => ({ id: t.ruta_id, nombre: t.ruta_nombre, comuna: t.ruta_comuna, horario_estimado: t.horario_estimado, trazado_geojson: t.trazado_geojson })))
-    : rutas;
-
-  const vehiculosConductor = (tieneTurnosAsignados && !modoLibreAdmin)
-    ? vehiculos.filter((v) => turnosAsignados.some((t) => t.vehiculo_id === v.id))
-    : vehiculos;
-
-  const turnoAsignadoSeleccionado = turnosAsignados.find((t) => t.ruta_id === selectedRuta) || turnosAsignados[0] || null;
 
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '12px' }}>
@@ -731,13 +734,13 @@ export const ConductorView: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                    🧤 Ayudante 1: <b>{turnoAsignadoSeleccionado.ayudante_1 || 'Hamilton Rivas'}</b>
+                    🧤 Ayudante 1: <b>{turnoAsignadoSeleccionado.ayudante_1 || 'Sin asignar'}</b>
                   </span>
                   <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                    🧤 Ayudante 2: <b>{turnoAsignadoSeleccionado.ayudante_2 || 'Jhon Jairo Moreno'}</b>
+                    🧤 Ayudante 2: <b>{turnoAsignadoSeleccionado.ayudante_2 || 'Sin asignar'}</b>
                   </span>
                   <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
-                    🧹 Barrendero: <b>{turnoAsignadoSeleccionado.barrendero || 'Carmen Córdoba'}</b>
+                    🧹 Barrendero: <b>{turnoAsignadoSeleccionado.barrendero || 'Sin asignar'}</b>
                   </span>
                 </div>
               </div>

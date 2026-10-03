@@ -848,14 +848,13 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           <button
             type="button"
             onClick={() => setIsCenterTargetActive((prev) => !prev)}
-            className="glass-panel"
+            className="glass-panel eco-mobile-target-only"
             style={{
               width: '38px',
               height: '38px',
               borderRadius: '10px',
               border: isCenterTargetActive ? '1.5px solid #10b981' : '1px solid var(--border-subtle)',
               color: isCenterTargetActive ? '#34d399' : '#94a3b8',
-              display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
@@ -954,18 +953,20 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
       {/* Mira Central Fija para Selección Táctil en Móvil (100% inmune a bugs de touch en iOS) */}
       {isCenterTargetActive && !selectedPoint && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -100%)',
-          zIndex: 890,
-          pointerEvents: 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          transition: 'transform 0.15s ease'
-        }}>
+        <div 
+          className="eco-mobile-target-only"
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -100%)',
+            zIndex: 890,
+            pointerEvents: 'none',
+            flexDirection: 'column',
+            alignItems: 'center',
+            transition: 'transform 0.15s ease'
+          }}
+        >
           {/* Píldora de Barrio Cercano Flotante sobre el Pin */}
           <div style={{
             background: 'rgba(15, 23, 42, 0.94)',
@@ -1009,18 +1010,20 @@ export const MapComponent: React.FC<MapComponentProps> = ({
 
       {/* Barra Flotante Inferior de Fijación (Especial para Mobile / iOS) */}
       {isCenterTargetActive && !selectedPoint && !hideConfirmButton && Boolean(onMapClick || onAddPoint) && (
-        <div style={{
-          position: 'absolute',
-          bottom: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 920,
-          display: 'flex',
-          gap: '8px',
-          width: 'calc(100% - 32px)',
-          maxWidth: '430px',
-          animation: 'slideUp 0.3s ease'
-        }}>
+        <div 
+          className="eco-mobile-target-only"
+          style={{
+            position: 'absolute',
+            bottom: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 920,
+            gap: '8px',
+            width: 'calc(100% - 32px)',
+            maxWidth: '430px',
+            animation: 'slideUp 0.3s ease'
+          }}
+        >
           <button
             type="button"
             onClick={handleConfirmCenterPoint}

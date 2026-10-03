@@ -329,9 +329,35 @@ export class PostgisRepository {
   async iniciarTurno(vehiculoId: string, rutaId: string, conductorNombre: string = 'Operador Principal', conductorId?: string) {
     await query(`UPDATE vehiculos SET estado = 'en_ruta' WHERE id = $1`, [vehiculoId]);
 
+    // Buscar si ya existe un turno programado o pausado para este vehículo/ruta en fecha de hoy o reciente
+    const checkSql = `
+      SELECT id, ayudante_1, ayudante_2, barrendero FROM turnos_recoleccion
+      WHERE (vehiculo_id = $1 OR ruta_id = $2 OR conductor_nombre ILIKE $3)
+        AND estado IN ('programado', 'pausado')
+      ORDER BY (fecha_programada = CURRENT_DATE) DESC, creado_en DESC
+      LIMIT 1;
+    `;
+    const checkRes = await query(checkSql, [vehiculoId, rutaId, conductorNombre]);
+
+    if (checkRes.rows.length > 0) {
+      const updateSql = `
+        UPDATE turnos_recoleccion
+        SET estado = 'activo',
+            hora_inicio = COALESCE(hora_inicio, NOW()),
+            vehiculo_id = $1,
+            ruta_id = $2,
+            conductor_nombre = COALESCE(NULLIF($3, ''), conductor_nombre),
+            conductor_id = COALESCE($4, conductor_id)
+        WHERE id = $5
+        RETURNING *;
+      `;
+      const res = await query(updateSql, [vehiculoId, rutaId, conductorNombre, conductorId || null, checkRes.rows[0].id]);
+      return res.rows[0];
+    }
+
     const sql = `
-      INSERT INTO turnos_recoleccion (vehiculo_id, ruta_id, conductor_nombre, conductor_id, hora_inicio, estado)
-      VALUES ($1, $2, $3, $4, NOW(), 'activo')
+      INSERT INTO turnos_recoleccion (vehiculo_id, ruta_id, conductor_nombre, conductor_id, hora_inicio, estado, fecha_programada)
+      VALUES ($1, $2, $3, $4, NOW(), 'activo', CURRENT_DATE)
       RETURNING *;
     `;
     const res = await query(sql, [vehiculoId, rutaId, conductorNombre, conductorId || null]);
@@ -387,6 +413,11 @@ export class PostgisRepository {
         v.placa as vehiculo_placa, 
         v.codigo as vehiculo_codigo,
         t.conductor_nombre, 
+        t.conductor_id,
+        t.ayudante_1,
+        t.ayudante_2,
+        t.barrendero,
+        t.fecha_programada,
         t.estado, 
         t.hora_inicio,
         tp.velocidad,
@@ -764,9 +795,15 @@ export class PostgisRepository {
       FROM turnos_recoleccion t
       JOIN rutas r ON r.id = t.ruta_id
       JOIN vehiculos v ON v.id = t.vehiculo_id
-      WHERE (t.conductor_id = $1 OR t.conductor_nombre ILIKE '%Yesid%')
+      WHERE (
+        t.conductor_id = $1 
+        OR t.conductor_id IN (SELECT id FROM usuarios WHERE id = $1)
+        OR t.conductor_nombre ILIKE (SELECT '%' || nombre || '%' FROM usuarios WHERE id = $1 LIMIT 1)
+        OR t.conductor_nombre = (SELECT TRIM(CONCAT(nombre, ' ', COALESCE(apellidos, ''))) FROM usuarios WHERE id = $1 LIMIT 1)
+        OR (SELECT rol FROM usuarios WHERE id = $1 LIMIT 1) = 'operaciones'
+      )
         AND t.estado IN ('programado', 'activo', 'pausado')
-      ORDER BY t.fecha_programada ASC, t.hora_inicio DESC;
+      ORDER BY (t.fecha_programada = CURRENT_DATE) DESC, t.fecha_programada DESC, t.hora_inicio DESC;
     `;
     const res = await query(sql, [conductorId]);
     return res.rows;
@@ -783,6 +820,65 @@ export class PostgisRepository {
     fecha_programada: string;
     observaciones?: string;
   }) {
+    // Si no viene conductor_id, buscarlo en la tabla de usuarios por nombre
+    let conductorId = data.conductor_id;
+    if (!conductorId && data.conductor_nombre) {
+      const uRes = await query(
+        `SELECT id FROM usuarios 
+         WHERE rol = 'conductor' 
+           AND (TRIM(CONCAT(nombre, ' ', COALESCE(apellidos, ''))) ILIKE $1 
+                OR nombre ILIKE $1 
+                OR $1 ILIKE '%' || nombre || '%')
+         LIMIT 1`,
+        [data.conductor_nombre.trim()]
+      );
+      if (uRes.rows.length > 0) {
+        conductorId = uRes.rows[0].id;
+      }
+    }
+
+    // Validación anti-duplicados estricta:
+    // Nunca dos conductores en la misma ruta o camión en la misma fecha
+    const existing = await query(
+      `SELECT id, ruta_id, vehiculo_id, conductor_nombre, conductor_id 
+       FROM turnos_recoleccion 
+       WHERE fecha_programada = $1 
+         AND (ruta_id = $2 OR vehiculo_id = $3 OR conductor_nombre ILIKE $4 OR (conductor_id IS NOT NULL AND conductor_id = $5))
+         AND estado IN ('programado', 'activo', 'pausado')
+       LIMIT 1`,
+      [data.fecha_programada, data.ruta_id, data.vehiculo_id, data.conductor_nombre.trim(), conductorId || null]
+    );
+
+    if (existing.rows.length > 0) {
+      // Actualizar el turno existente sin crear filas duplicadas
+      const updateSql = `
+        UPDATE turnos_recoleccion
+        SET 
+          ruta_id = $1,
+          vehiculo_id = $2,
+          conductor_nombre = $3,
+          conductor_id = $4,
+          ayudante_1 = $5,
+          ayudante_2 = $6,
+          barrendero = $7,
+          observaciones = $8
+        WHERE id = $9
+        RETURNING *;
+      `;
+      const updateRes = await query(updateSql, [
+        data.ruta_id,
+        data.vehiculo_id,
+        data.conductor_nombre,
+        conductorId || null,
+        data.ayudante_1 || 'Sin asignar',
+        data.ayudante_2 || 'Sin asignar',
+        data.barrendero || 'Sin asignar',
+        data.observaciones || null,
+        existing.rows[0].id
+      ]);
+      return { ...updateRes.rows[0], fueActualizado: true };
+    }
+
     const sql = `
       INSERT INTO turnos_recoleccion (
         ruta_id, 
@@ -803,10 +899,10 @@ export class PostgisRepository {
       data.ruta_id,
       data.vehiculo_id,
       data.conductor_nombre,
-      data.conductor_id || null,
-      data.ayudante_1 || 'Carlos Perea (Recolector)',
-      data.ayudante_2 || 'Marlon Córdoba (Recolector)',
-      data.barrendero || 'Leider Mena (Barrido)',
+      conductorId || null,
+      data.ayudante_1 || 'Sin asignar',
+      data.ayudante_2 || 'Sin asignar',
+      data.barrendero || 'Sin asignar',
       data.fecha_programada,
       data.observaciones || null
     ]);
