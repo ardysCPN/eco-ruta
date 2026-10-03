@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import { Sun, Moon } from 'lucide-react';
+import { Sun, Moon, Crosshair, MapPin, Navigation, Check } from 'lucide-react';
+import { obtenerBarrioYComunaCercana } from '@eco-ruta/shared';
 
 export interface TruckMarkerData {
   id?: string;
@@ -76,6 +77,9 @@ interface MapComponentProps {
   height?: string;
   theme?: 'dark' | 'light';
   onThemeChange?: (theme: 'dark' | 'light') => void;
+  enableCenterTarget?: boolean;
+  targetConfirmLabel?: string;
+  hideConfirmButton?: boolean;
 }
 
 export const MapComponent: React.FC<MapComponentProps> = ({
@@ -98,7 +102,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   onMapClick,
   onAddPoint,
   height = '520px',
-  theme
+  theme,
+  enableCenterTarget,
+  targetConfirmLabel,
+  hideConfirmButton = false
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -120,6 +127,13 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     if (theme) return theme;
     return (localStorage.getItem('eco_map_theme') as 'dark' | 'light') || 'dark';
   });
+
+  // Mira Central de Ubicación (Uber/InDrive para Móvil iOS y Web)
+  const [isCenterTargetActive, setIsCenterTargetActive] = useState<boolean>(() =>
+    enableCenterTarget !== undefined ? enableCenterTarget : Boolean(onMapClick || onAddPoint)
+  );
+  const [centerCoords, setCenterCoords] = useState<{ lat: number; lng: number }>({ lat: center[0], lng: center[1] });
+  const [centerBarrio, setCenterBarrio] = useState<string | null>(null);
 
   // Animación suave de movimiento continuo (estilo InDrive/Uber)
   const animFrameRef = useRef<number | null>(null);
@@ -182,13 +196,93 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       triggerClick(e.latlng.lat, e.latlng.lng);
     });
 
+    // Tracking de movimiento del mapa para la Mira Central
+    map.on('move', () => {
+      const c = map.getCenter();
+      setCenterCoords({ lat: c.lat, lng: c.lng });
+      const detected = obtenerBarrioYComunaCercana(c.lat, c.lng, 900);
+      setCenterBarrio(detected ? detected.barrio : null);
+    });
+
+    // Soporte táctil optimizado para iOS Safari / WebKit (ignora micro-movimientos para no perder taps)
+    const container = mapContainerRef.current;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.changedTouches.length === 1) {
+        const dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+        const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+        const dt = Date.now() - touchStartTime;
+
+        // Si el usuario dio un tap nítido (movimiento < 12px y tiempo < 380ms)
+        if (dx < 12 && dy < 12 && dt < 380 && container && mapInstanceRef.current) {
+          const rect = container.getBoundingClientRect();
+          const point = L.point(
+            e.changedTouches[0].clientX - rect.left,
+            e.changedTouches[0].clientY - rect.top
+          );
+          const latlng = mapInstanceRef.current.containerPointToLatLng(point);
+          triggerClick(latlng.lat, latlng.lng);
+        }
+      }
+    };
+
+    if (container) {
+      container.addEventListener('touchstart', handleTouchStart, { passive: true });
+      container.addEventListener('touchend', handleTouchEnd, { passive: true });
+    }
+
     mapInstanceRef.current = map;
 
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (container) {
+        container.removeEventListener('touchstart', handleTouchStart);
+        container.removeEventListener('touchend', handleTouchEnd);
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
+  }, []);
+
+  // Confirmar el punto central de la mira (Especial para móviles táctiles)
+  const handleConfirmCenterPoint = useCallback(() => {
+    if (mapInstanceRef.current) {
+      const c = mapInstanceRef.current.getCenter();
+      if (onMapClickRef.current) onMapClickRef.current(c.lat, c.lng);
+      if (onAddPointRef.current) onAddPointRef.current(c.lat, c.lng);
+    }
+  }, []);
+
+  // Ubicar usando GPS del dispositivo móvil
+  const handleUseGps = useCallback(() => {
+    if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.flyTo([lat, lng], 17, { duration: 1.2 });
+          }
+          if (onMapClickRef.current) onMapClickRef.current(lat, lng);
+          if (onAddPointRef.current) onAddPointRef.current(lat, lng);
+        },
+        (err) => {
+          console.warn('GPS location error:', err.message);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    }
   }, []);
 
   const toggleTheme = () => {
@@ -739,7 +833,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         style={{ width: '100%', height: '100%' }} 
       />
 
-      {/* Modern Floating Map Controls (Tema, Zoom & Centrar) */}
+      {/* Modern Floating Map Controls (Tema, Zoom, Centrar & Modo Mira) */}
       <div style={{
         position: 'absolute',
         top: '16px',
@@ -749,6 +843,31 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         flexDirection: 'column',
         gap: '8px'
       }}>
+        {/* Botón Alternar Mira Central (Touch Mobile) */}
+        {Boolean(onMapClick || onAddPoint) && (
+          <button
+            type="button"
+            onClick={() => setIsCenterTargetActive((prev) => !prev)}
+            className="glass-panel"
+            style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '10px',
+              border: isCenterTargetActive ? '1.5px solid #10b981' : '1px solid var(--border-subtle)',
+              color: isCenterTargetActive ? '#34d399' : '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: isCenterTargetActive ? '0 0 15px rgba(16, 185, 129, 0.45)' : '0 4px 14px rgba(0,0,0,0.4)',
+              background: isCenterTargetActive ? 'rgba(16, 185, 129, 0.25)' : 'rgba(15, 23, 42, 0.92)'
+            }}
+            title={isCenterTargetActive ? 'Desactivar Mira Central' : 'Activar Mira Central para Ubicar en Móvil'}
+          >
+            <Crosshair size={18} />
+          </button>
+        )}
+
         {/* Botón Modo Claro / Oscuro */}
         <button
           onClick={toggleTheme}
@@ -832,6 +951,122 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           📍
         </button>
       </div>
+
+      {/* Mira Central Fija para Selección Táctil en Móvil (100% inmune a bugs de touch en iOS) */}
+      {isCenterTargetActive && !selectedPoint && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -100%)',
+          zIndex: 890,
+          pointerEvents: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          transition: 'transform 0.15s ease'
+        }}>
+          {/* Píldora de Barrio Cercano Flotante sobre el Pin */}
+          <div style={{
+            background: 'rgba(15, 23, 42, 0.94)',
+            color: '#34d399',
+            padding: '5px 12px',
+            borderRadius: '20px',
+            fontSize: '0.74rem',
+            fontWeight: 700,
+            border: '1.5px solid #10b981',
+            boxShadow: '0 4px 18px rgba(0, 0, 0, 0.65), 0 0 12px rgba(16, 185, 129, 0.35)',
+            whiteSpace: 'nowrap',
+            marginBottom: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <MapPin size={13} color="#10b981" />
+            <span>{centerBarrio ? `Barrio ${centerBarrio}` : `${centerCoords.lat.toFixed(4)}, ${centerCoords.lng.toFixed(4)}`}</span>
+          </div>
+
+          {/* Ícono de Pin Elevado */}
+          <div style={{
+            fontSize: '2.6rem',
+            lineHeight: 1,
+            filter: 'drop-shadow(0 8px 14px rgba(0,0,0,0.8))',
+            transform: 'translateY(-2px)'
+          }}>
+            📍
+          </div>
+          {/* Anillo de Mira en Suelo */}
+          <div style={{
+            width: '14px',
+            height: '7px',
+            background: 'rgba(16, 185, 129, 0.5)',
+            border: '1.5px solid #34d399',
+            borderRadius: '50%',
+            marginTop: '-3px'
+          }} />
+        </div>
+      )}
+
+      {/* Barra Flotante Inferior de Fijación (Especial para Mobile / iOS) */}
+      {isCenterTargetActive && !selectedPoint && !hideConfirmButton && Boolean(onMapClick || onAddPoint) && (
+        <div style={{
+          position: 'absolute',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 920,
+          display: 'flex',
+          gap: '8px',
+          width: 'calc(100% - 32px)',
+          maxWidth: '430px',
+          animation: 'slideUp 0.3s ease'
+        }}>
+          <button
+            type="button"
+            onClick={handleConfirmCenterPoint}
+            className="btn btn-primary"
+            style={{
+              flex: 1,
+              padding: '13px 18px',
+              fontSize: '0.88rem',
+              fontWeight: 800,
+              boxShadow: '0 8px 25px rgba(16, 185, 129, 0.45)',
+              background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+              border: '1.5px solid #34d399',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}
+          >
+            <Check size={18} />
+            <span>{targetConfirmLabel || 'Fijar este punto aquí'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleUseGps}
+            className="btn btn-secondary"
+            style={{
+              padding: '13px 15px',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              background: 'rgba(15, 23, 42, 0.94)',
+              border: '1.5px solid rgba(56, 189, 248, 0.5)',
+              color: '#38bdf8'
+            }}
+            title="Ubicar con mi GPS actual"
+          >
+            <Navigation size={16} />
+            <span>Mi GPS</span>
+          </button>
+        </div>
+      )}
+
     </div>
   );
 };

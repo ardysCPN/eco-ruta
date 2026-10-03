@@ -42,6 +42,7 @@ export const ConductorView: React.FC = () => {
   // PIN Login rápido de cabina si no está autenticado como conductor
   const [pinInput, setPinInput] = useState('');
   const isConductorAuth = user?.rol === 'conductor';
+  const [modoLibreAdmin, setModoLibreAdmin] = useState(false);
 
   // Alerta sonora anti-desvío
   const [alertaDesvioActiva, setAlertaDesvioActiva] = useState(false);
@@ -405,8 +406,20 @@ export const ConductorView: React.FC = () => {
     );
   }
 
-  // Rutas disponibles para este conductor (permite previsualizar y elegir cualquier ruta del catálogo)
-  const rutasConductor = rutas;
+  // Rutas y Vehículos asignados estrictamente a este conductor por Despacho EPQ
+  const tieneTurnosAsignados = turnosAsignados.length > 0;
+
+  const rutasConductor = (tieneTurnosAsignados && !modoLibreAdmin)
+    ? (rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id)).length > 0
+        ? rutas.filter((r) => turnosAsignados.some((t) => t.ruta_id === r.id))
+        : turnosAsignados.map(t => ({ id: t.ruta_id, nombre: t.ruta_nombre, comuna: t.ruta_comuna, horario_estimado: t.horario_estimado, trazado_geojson: t.trazado_geojson })))
+    : rutas;
+
+  const vehiculosConductor = (tieneTurnosAsignados && !modoLibreAdmin)
+    ? vehiculos.filter((v) => turnosAsignados.some((t) => t.vehiculo_id === v.id))
+    : vehiculos;
+
+  const turnoAsignadoSeleccionado = turnosAsignados.find((t) => t.ruta_id === selectedRuta) || turnosAsignados[0] || null;
 
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '12px' }}>
@@ -596,18 +609,140 @@ export const ConductorView: React.FC = () => {
       {/* Selector de Ruta si no hay turno activo */}
       {!turnoActivo && (
         <div className="glass-panel" style={{ padding: '18px', marginBottom: '14px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h3 style={{ margin: 0, fontSize: '0.95rem', color: '#f8fafc' }}>
-              Seleccionar Hoja de Ruta Asignada (Quibdó):
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+            <h3 style={{ margin: 0, fontSize: '0.96rem', color: '#f8fafc', fontWeight: 800 }}>
+              {tieneTurnosAsignados && !modoLibreAdmin
+                ? '📋 Hoja de Ruta Asignada Oficial (Despacho EPQ):'
+                : 'Seleccionar Hoja de Ruta (Quibdó):'}
             </h3>
-            {turnosAsignados.length > 0 && (
-              <span className="badge badge-activo" style={{ fontSize: '0.7rem' }}>
-                {turnosAsignados.length} Turno(s) Asignado(s) por EPQ
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {tieneTurnosAsignados && (
+                <span className="badge badge-activo" style={{ fontSize: '0.72rem' }}>
+                  ✓ {turnosAsignados.length} Turno Oficial Asignado
+                </span>
+              )}
+              {user?.rol === 'operaciones' && (
+                <button
+                  type="button"
+                  onClick={() => setModoLibreAdmin((prev) => !prev)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '8px',
+                    color: '#94a3b8',
+                    fontSize: '0.7rem',
+                    padding: '3px 8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {modoLibreAdmin ? 'Volver a mi asignación' : 'Modo Admin Libre'}
+                </button>
+              )}
+            </div>
           </div>
 
-          {rutasConductor.length === 0 ? (
+          {tieneTurnosAsignados && !modoLibreAdmin && turnoAsignadoSeleccionado ? (
+            /* FICHA DE ASIGNACIÓN ESTRICTA DEL CONDUCTOR */
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(15, 23, 42, 0.8) 100%)',
+              border: '1.5px solid rgba(16, 185, 129, 0.4)',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}>
+              {/* Si tiene más de 1 turno asignado, permite elegir entre SUS turnos asignados */}
+              {turnosAsignados.length > 1 && (
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                    Tienes varios turnos asignados para hoy. Elige cuál iniciar:
+                  </label>
+                  <select
+                    className="input-control"
+                    value={selectedRuta}
+                    onChange={(e) => {
+                      setSelectedRuta(e.target.value);
+                      const t = turnosAsignados.find(item => item.ruta_id === e.target.value);
+                      if (t?.vehiculo_id) setSelectedVehiculo(t.vehiculo_id);
+                    }}
+                  >
+                    {turnosAsignados.map((t) => (
+                      <option key={t.id} value={t.ruta_id}>
+                        {t.ruta_nombre} ({t.ruta_comuna}) - Vehículo {t.vehiculo_codigo}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid-responsive-2" style={{ gap: '14px' }}>
+                {/* Datos de Ruta */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)'
+                }}>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 800 }}>
+                    Ruta Oficial Asignada
+                  </div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#34d399', margin: '4px 0 2px' }}>
+                    {turnoAsignadoSeleccionado.ruta_nombre}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#cbd5e1' }}>
+                    Sector: <b>{turnoAsignadoSeleccionado.ruta_comuna || 'Quibdó'}</b> &bull; Horario: <b>{turnoAsignadoSeleccionado.horario_estimado || 'Jornada Diurna'}</b>
+                  </div>
+                </div>
+
+                {/* Datos de Vehículo Compactador */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  padding: '12px',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)'
+                }}>
+                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 800 }}>
+                    Vehículo Compactador Asignado
+                  </div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#38bdf8', margin: '4px 0 2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Truck size={20} color="#38bdf8" />
+                    <span>{turnoAsignadoSeleccionado.vehiculo_codigo} ({turnoAsignadoSeleccionado.vehiculo_placa})</span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
+                    Vehículo reservado para tu turno para evitar confusiones de flota.
+                  </div>
+                </div>
+              </div>
+
+              {/* Fila de Compañeros de Cuadrilla */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.06)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <Users size={16} color="#fbbf24" />
+                  <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#f8fafc' }}>
+                    Compañeros de Cuadrilla Asignados:
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    🧤 Ayudante 1: <b>{turnoAsignadoSeleccionado.ayudante_1 || 'Hamilton Rivas'}</b>
+                  </span>
+                  <span className="badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    🧤 Ayudante 2: <b>{turnoAsignadoSeleccionado.ayudante_2 || 'Jhon Jairo Moreno'}</b>
+                  </span>
+                  <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                    🧹 Barrendero: <b>{turnoAsignadoSeleccionado.barrendero || 'Carmen Córdoba'}</b>
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : rutasConductor.length === 0 ? (
             <div style={{
               background: 'rgba(245, 158, 11, 0.12)',
               border: '1px solid #f59e0b',
@@ -618,9 +753,9 @@ export const ConductorView: React.FC = () => {
               fontSize: '0.84rem',
               lineHeight: 1.5
             }}>
-              <b style={{ color: '#fbbf24' }}>📍 No hay micro-rutas registradas todavía en Quibdó.</b>
+              <b style={{ color: '#fbbf24' }}>📍 No tienes turnos asignados por la administración de EPQ para hoy.</b>
               <p style={{ margin: '6px 0 0', fontSize: '0.78rem', color: '#fde68a' }}>
-                Para probar tu recorrido (ej. <i>Oficina a Casa</i>), ingresa al módulo <b>Operaciones</b> &rarr; pestaña <b>Diseñar Rutas por Calles (OSRM)</b>, haz clic en las calles por donde transitarás y presiona <b>Guardar Ruta</b>. Tu ruta aparecerá aquí al instante para iniciar tu turno.
+                Comunícate con el despachador de EPQ para que te asigne ruta y compactador, o ingresa al módulo <b>Operaciones</b> para planificar la jornada.
               </p>
             </div>
           ) : (
@@ -647,7 +782,7 @@ export const ConductorView: React.FC = () => {
                   value={selectedVehiculo}
                   onChange={(e) => setSelectedVehiculo(e.target.value)}
                 >
-                  {vehiculos.map((v) => (
+                  {vehiculosConductor.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.codigo} ({v.placa}) - {v.capacidad_ton} Ton
                     </option>
@@ -671,7 +806,7 @@ export const ConductorView: React.FC = () => {
             }}
           >
             <Play size={20} />
-            <span>INICIAR TURNO DE RECOLECCIÓN</span>
+            <span>INICIAR MI TURNO DE RECOLECCIÓN</span>
           </button>
         </div>
       )}

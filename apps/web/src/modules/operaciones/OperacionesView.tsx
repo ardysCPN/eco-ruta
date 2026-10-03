@@ -18,13 +18,14 @@ import {
   FileSpreadsheet,
   Search,
   Check,
-  X
+  X,
+  Undo2
 } from 'lucide-react';
 import { MapComponent } from '../../shared/components/MapComponent.js';
 import { EmployeeSelectCombobox, EmpleadoItem } from '../../shared/components/EmployeeSelectCombobox.js';
 import { api } from '../../shared/services/api.js';
 import { socket } from '../../shared/services/socket.js';
-import { EstadoPQRS, COMUNAS_QUIBDO } from '@eco-ruta/shared';
+import { EstadoPQRS, COMUNAS_QUIBDO, detectarComunasDeTrazado, obtenerBarrioYComunaCercana } from '@eco-ruta/shared';
 import { toast } from 'sonner';
 
 interface OperacionesViewProps {
@@ -101,6 +102,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
   const [calculandoRuta, setCalculandoRuta] = useState(false);
   const [nuevaRutaNombre, setNuevaRutaNombre] = useState('');
   const [nuevaRutaComuna, setNuevaRutaComuna] = useState(COMUNAS_QUIBDO[1].nombre);
+  const [comunasSeleccionadas, setComunasSeleccionadas] = useState<string[]>([COMUNAS_QUIBDO[1].nombre]);
   const [nuevaRutaDias, setNuevaRutaDias] = useState('Martes, Jueves, Sábado');
   const [nuevaRutaHorario, setNuevaRutaHorario] = useState('19:00 - 22:30');
 
@@ -293,6 +295,93 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
     toast.info('Puntos de referencia de Quibdó cargados en el mapa.');
   };
 
+  // Trazado Exacto Directo por Puntos (Sigue solo las paradas marcadas, sin desvíos en otros barrios)
+  const handleTrazarDirectoPorPuntos = () => {
+    if (disenadorPuntos.length < 2) {
+      toast.error('Agrega al menos 2 puntos en el mapa para trazar una ruta.');
+      return;
+    }
+
+    // Coordenadas GeoJSON LineString [lng, lat]
+    const coordsGeoJson = disenadorPuntos.map((p) => {
+      const lat = p[0] > 0 ? p[0] : p[1];
+      const lng = p[0] > 0 ? p[1] : p[0];
+      return [lng, lat];
+    });
+
+    const geoJsonFeature = {
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: coordsGeoJson
+      },
+      properties: {
+        modo: 'exacto_por_puntos'
+      }
+    };
+
+    // Calcular distancia Haversine acumulada punto a punto en Quibdó
+    let distKm = 0;
+    for (let i = 0; i < disenadorPuntos.length - 1; i++) {
+      const p1 = disenadorPuntos[i];
+      const p2 = disenadorPuntos[i + 1];
+      const lat1 = p1[0] > 0 ? p1[0] : p1[1];
+      const lng1 = p1[0] > 0 ? p1[1] : p1[0];
+      const lat2 = p2[0] > 0 ? p2[0] : p2[1];
+      const lng2 = p2[0] > 0 ? p2[1] : p2[0];
+      const dLat = (lat2 - lat1) * 111.32;
+      const dLng = (lng2 - lng1) * 111.32 * Math.cos((lat1 * Math.PI) / 180);
+      distKm += Math.sqrt(dLat * dLat + dLng * dLng);
+    }
+
+    const durMin = Math.max(10, Math.round((distKm / 18) * 60) + (disenadorPuntos.length * 2));
+
+    setTrazadoCalculado(geoJsonFeature);
+    setDistanciaKm(distKm.toFixed(2));
+    setDuracionMin(durMin);
+
+    // Detección automática de comunas atravesadas por los puntos
+    const comunasDetectadas = detectarComunasDeTrazado(disenadorPuntos);
+    if (comunasDetectadas.length > 0) {
+      const nombres = comunasDetectadas.map((c) => c.nombre);
+      setComunasSeleccionadas(nombres);
+      setNuevaRutaComuna(nombres.map(c => c.split(' (')[0]).join(', '));
+      toast.success(`📍 Trazado exacto generado: ${distKm.toFixed(2)} km siguiendo fielmente tus ${disenadorPuntos.length} puntos. Comunas detectadas: ${comunasDetectadas.map(c => c.nombre.split(' (')[0]).join(', ')}.`);
+    } else {
+      toast.success(`📍 Trazado exacto generado: ${distKm.toFixed(2)} km siguiendo fielmente tus ${disenadorPuntos.length} puntos.`);
+    }
+  };
+
+  // Deshacer último punto marcado en el diseñador
+  const handleDeshacerPunto = () => {
+    if (disenadorPuntos.length === 0) return;
+    const nuevos = disenadorPuntos.slice(0, -1);
+    setDisenadorPuntos(nuevos);
+
+    if (nuevos.length < 2) {
+      setTrazadoCalculado(null);
+      setDistanciaKm(null);
+      setDuracionMin(null);
+    } else if (trazadoCalculado) {
+      const coordsGeoJson = nuevos.map((p) => {
+        const lat = p[0] > 0 ? p[0] : p[1];
+        const lng = p[0] > 0 ? p[1] : p[0];
+        return [lng, lat];
+      });
+      setTrazadoCalculado({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coordsGeoJson },
+        properties: {}
+      });
+      const comunasDetectadas = detectarComunasDeTrazado(nuevos);
+      if (comunasDetectadas.length > 0) {
+        setComunasSeleccionadas(comunasDetectadas.map((c) => c.nombre));
+        setNuevaRutaComuna(comunasDetectadas.map((c) => c.nombre.split(' (')[0]).join(', '));
+      }
+    }
+    toast.info('Último punto eliminado.');
+  };
+
   // Calcular Trazado OSRM por Calles
   const handleCalcularTrazado = async () => {
     if (disenadorPuntos.length < 2) {
@@ -306,6 +395,15 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
       setTrazadoCalculado(res.data.trazado_geojson);
       setDistanciaKm(res.data.distancia_km.toFixed(2));
       setDuracionMin(Math.round(res.data.duracion_min));
+
+      // Detección automática de comunas atravesadas
+      const comunasDetectadas = detectarComunasDeTrazado(disenadorPuntos);
+      if (comunasDetectadas.length > 0) {
+        const nombres = comunasDetectadas.map((c) => c.nombre);
+        setComunasSeleccionadas(nombres);
+        setNuevaRutaComuna(nombres.map(c => c.split(' (')[0]).join(', '));
+      }
+
       toast.success(`Trazado vial OSRM calculado: ${res.data.distancia_km.toFixed(2)} km siguiendo las calles reales.`);
     } catch (err: any) {
       toast.error(err.message || 'Error al calcular ruta con OSRM');
@@ -322,14 +420,18 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
       return;
     }
     if (!trazadoCalculado) {
-      toast.error('Primero calcula el trazado por calles con el botón OSRM.');
+      toast.error('Primero genera el trazado de la ruta (Directo por Puntos o por OSRM).');
       return;
     }
+
+    const comunaFinal = comunasSeleccionadas.length > 0
+      ? comunasSeleccionadas.map((c) => c.split(' (')[0]).join(', ')
+      : nuevaRutaComuna;
 
     try {
       await api.crearRuta({
         nombre: nuevaRutaNombre,
-        comuna: nuevaRutaComuna,
+        comuna: comunaFinal,
         dias_servicio: nuevaRutaDias,
         horario_estimado: nuevaRutaHorario,
         trazado_geojson: trazadoCalculado
@@ -841,7 +943,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
                 </div>
 
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '14px' }}>
-                  Haz clic en el mapa en los puntos por donde debe circular el camión. Nuestro motor OSRM conectará los puntos siguiendo exactamente la malla vial y curvas de las calles de Quibdó (sin líneas rectas sobre casas ni ríos).
+                  Haz clic en el mapa (o usa la mira central en móviles) en cada parada del camión. Con <b>Trazar Exacto por Puntos</b> el recorrido seguirá estrictamente la secuencia de tus paradas sin entrar a barrios que no destinaste.
                 </p>
 
                 {/* Controles del Diseñador */}
@@ -856,7 +958,7 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
                   borderRadius: '10px',
                   marginBottom: '12px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>
                       Puntos marcados: <b>{disenadorPuntos.length}</b>
                     </span>
@@ -867,32 +969,63 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {disenadorPuntos.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDisenadorPuntos([]);
-                          setTrazadoCalculado(null);
-                          setDistanciaKm(null);
-                        }}
-                        className="btn btn-secondary"
-                        style={{ padding: '6px 10px', fontSize: '0.76rem', color: '#f87171' }}
-                      >
-                        <Trash2 size={13} />
-                        <span>Limpiar</span>
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleDeshacerPunto}
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 10px', fontSize: '0.76rem', color: '#38bdf8' }}
+                          title="Deshacer último punto marcado"
+                        >
+                          <Undo2 size={13} />
+                          <span>Deshacer</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDisenadorPuntos([]);
+                            setTrazadoCalculado(null);
+                            setDistanciaKm(null);
+                            setDuracionMin(null);
+                          }}
+                          className="btn btn-secondary"
+                          style={{ padding: '6px 10px', fontSize: '0.76rem', color: '#f87171' }}
+                        >
+                          <Trash2 size={13} />
+                          <span>Limpiar</span>
+                        </button>
+                      </>
                     )}
+
+                    <button
+                      type="button"
+                      disabled={disenadorPuntos.length < 2}
+                      onClick={handleTrazarDirectoPorPuntos}
+                      className="btn btn-primary"
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
+                      }}
+                      title="Genera el trazado guiado 100% por tus paradas, sin tomar desvíos hacia otros barrios"
+                    >
+                      <Check size={14} />
+                      <span>📍 Trazar Exacto por Puntos (Recomendado)</span>
+                    </button>
 
                     <button
                       type="button"
                       disabled={disenadorPuntos.length < 2 || calculandoRuta}
                       onClick={handleCalcularTrazado}
-                      className="btn btn-warning"
-                      style={{ padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700 }}
+                      className="btn btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                      title="Intenta conectar por calles calculadas por OSRM"
                     >
                       <Zap size={14} />
-                      <span>{calculandoRuta ? 'Calculando con OSRM...' : '⚡ Trazar por Calles (OSRM)'}</span>
+                      <span>{calculandoRuta ? 'Calculando...' : '⚡ Calles (OSRM)'}</span>
                     </button>
                   </div>
                 </div>
@@ -900,13 +1033,24 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
                 {/* Mapa Interactivo para Puntos */}
                 <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '16px' }}>
                   <MapComponent
-                    height="420px"
+                    height="430px"
                     onAddPoint={(lat, lng) => {
-                      setDisenadorPuntos((prev) => [...prev, [lat, lng]]);
-                      toast.info(`Punto agregado (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
+                      setDisenadorPuntos((prev) => {
+                        const nuevos: [number, number][] = [...prev, [lat, lng]];
+                        const comunasDetectadas = detectarComunasDeTrazado(nuevos);
+                        if (comunasDetectadas.length > 0) {
+                          setComunasSeleccionadas(comunasDetectadas.map((c) => c.nombre));
+                          setNuevaRutaComuna(comunasDetectadas.map((c) => c.nombre.split(' (')[0]).join(', '));
+                        }
+                        return nuevos;
+                      });
+                      const info = obtenerBarrioYComunaCercana(lat, lng, 1000);
+                      toast.info(`Punto #${disenadorPuntos.length + 1} agregado en ${info ? `Barrio ${info.barrio} (${info.comunaNombre.split(' (')[0]})` : 'Quibdó'}`);
                     }}
                     customWaypoints={disenadorPuntos}
                     calculatedRouteGeoJSON={trazadoCalculado}
+                    enableCenterTarget={true}
+                    targetConfirmLabel="Agregar Parada Aquí"
                   />
                 </div>
 
@@ -915,55 +1059,104 @@ export const OperacionesView: React.FC<OperacionesViewProps> = ({
                   <form onSubmit={handleGuardarRuta} className="glass-panel" style={{ padding: '16px' }}>
                     <h4 style={{ margin: '0 0 12px', fontSize: '0.95rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <CheckCircle2 size={16} />
-                      <span>¡Trazado Vial Listo! Guardar en Catálogo Oficial de Quibdó:</span>
+                      <span>¡Trazado de Ruta Listo! Guardar en Catálogo Oficial de Quibdó:</span>
                     </h4>
 
-                    <div className="grid-responsive-2" style={{ gap: '12px', marginBottom: '14px' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                          Nombre de la Micro-Ruta *:
-                        </label>
-                        <input
-                          type="text"
-                          className="input-control"
-                          placeholder="Ej. Ruta Alameda Reyes - Huapango"
-                          value={nuevaRutaNombre}
-                          onChange={(e) => setNuevaRutaNombre(e.target.value)}
-                          required
-                        />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '14px' }}>
+                      <div className="grid-responsive-2" style={{ gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                            Nombre de la Micro-Ruta *:
+                          </label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            placeholder="Ej. Ruta Alameda Reyes - Huapango"
+                            value={nuevaRutaNombre}
+                            onChange={(e) => setNuevaRutaNombre(e.target.value)}
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                            Días de Operación:
+                          </label>
+                          <input
+                            type="text"
+                            className="input-control"
+                            value={nuevaRutaDias}
+                            onChange={(e) => setNuevaRutaDias(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      {/* Selector Múltiple y Detección Automática de Comunas */}
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '10px',
+                        padding: '12px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ fontSize: '0.78rem', color: '#f8fafc', fontWeight: 700 }}>
+                            Comuna(s) que recorre el camión (Selección Automática y Múltiple):
+                          </label>
+                          {comunasSeleccionadas.length > 0 && (
+                            <span className="badge badge-activo" style={{ fontSize: '0.7rem' }}>
+                              ✨ {comunasSeleccionadas.length} Comuna(s) marcadas
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                          {COMUNAS_QUIBDO.map((c) => {
+                            const isSel = comunasSeleccionadas.includes(c.nombre);
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => {
+                                  if (isSel) {
+                                    if (comunasSeleccionadas.length > 1) {
+                                      setComunasSeleccionadas(comunasSeleccionadas.filter((item) => item !== c.nombre));
+                                    } else {
+                                      toast.warning('La ruta debe pasar por al menos una comuna.');
+                                    }
+                                  } else {
+                                    setComunasSeleccionadas([...comunasSeleccionadas, c.nombre]);
+                                  }
+                                }}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '20px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: isSel ? 700 : 500,
+                                  background: isSel ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                                  border: isSel ? '1.5px solid #10b981' : '1px solid rgba(255, 255, 255, 0.12)',
+                                  color: isSel ? '#34d399' : '#94a3b8',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <span>{isSel ? '✓' : '+'}</span>
+                                <span>{c.nombre.split(' (')[0]}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: '#94a3b8' }}>
+                          Registro oficial: <b style={{ color: '#38bdf8' }}>{comunasSeleccionadas.map(c => c.split(' (')[0]).join(', ')}</b>
+                        </div>
                       </div>
 
                       <div>
                         <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                          Comuna Oficial de Quibdó:
-                        </label>
-                        <select
-                          className="input-control"
-                          value={nuevaRutaComuna}
-                          onChange={(e) => setNuevaRutaComuna(e.target.value)}
-                        >
-                          {COMUNAS_QUIBDO.map(c => (
-                            <option key={c.id} value={c.nombre}>{c.nombre}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                          Días de Operación:
-                        </label>
-                        <input
-                          type="text"
-                          className="input-control"
-                          value={nuevaRutaDias}
-                          onChange={(e) => setNuevaRutaDias(e.target.value)}
-                          required
-                        />
-                      </div>
-
-                      <div>
-                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
-                          Horario Estimado:
+                          Horario Estimado de Recolección:
                         </label>
                         <input
                           type="text"
